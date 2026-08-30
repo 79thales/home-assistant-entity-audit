@@ -1,0 +1,26 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Audit entit",
+        "description": "Nastavte limity pro lokálně ukládané auditní záznamy vybraných entit.",
+        "data": {
+          "retention_days": "Doba uchování (dny)",
+          "max_events_per_entity": "Maximum záznamů na entitu"
+        }
+      }
+    },
+    "abort": { "already_configured": "Audit entit je již nastaven." }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Nastavení auditu entit",
+        "data": {
+          "retention_days": "Doba uchování (dny)",
+          "max_events_per_entity": "Maximum záznamů na entitu"
+        }
+      }
+    }
+  }
+}

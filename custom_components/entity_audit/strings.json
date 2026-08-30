@@ -1,0 +1,29 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Entity Audit",
+        "description": "Set limits for locally stored opt-in entity audit records.",
+        "data": {
+          "retention_days": "Retention (days)",
+          "max_events_per_entity": "Maximum events per entity"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Entity Audit is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Entity Audit settings",
+        "data": {
+          "retention_days": "Retention (days)",
+          "max_events_per_entity": "Maximum events per entity"
+        }
+      }
+    }
+  }
+}
+
