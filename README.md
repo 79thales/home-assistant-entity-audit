@@ -24,7 +24,7 @@ Entity Audit complements Home Assistant's built-in Recorder, History, and Activi
 
 ## Installation through HACS
 
-Until the repository is accepted into the HACS default catalog, add its GitHub URL under **HACS → Integrations → Custom repositories**, choose the **Integration** category, and install it. A public GitHub repository and release are required before this route can be used by others.
+Until the repository is accepted into the HACS default catalog, add `https://github.com/79thales/home-assistant-entity-audit` under **HACS → Integrations → Custom repositories**, choose the **Integration** category, and install it.
 
 ## Storage and privacy
 
@@ -39,9 +39,9 @@ The default retention is 30 days and 500 events per entity. Records contain the 
 
 Those projects overlap with parts of Entity Audit, but have a different focus and workflow.
 
-## Before publishing
+## Publishing status
 
-Replace `OWNER` in `custom_components/entity_audit/manifest.json` with the GitHub account or organization, add at least one `@codeowner`, add brand assets, enable Issues, and create a GitHub release. The included workflows validate the repository with HACS and Hassfest.
+The repository includes HACS and Hassfest validation workflows. Brand assets and submission to the default HACS catalog can be added after the integration has been tested on a live Home Assistant installation.
 
 ## Development checks
 
@@ -53,4 +53,3 @@ python -m json.tool custom_components/entity_audit/manifest.json
 ## License
 
 MIT
-
