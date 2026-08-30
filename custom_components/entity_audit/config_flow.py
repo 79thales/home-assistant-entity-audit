@@ -32,7 +32,7 @@ class EntityAuditConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        return EntityAuditOptionsFlow(config_entry)
+        return EntityAuditOptionsFlow()
 
     @staticmethod
     def _schema(values):
@@ -50,11 +50,8 @@ class EntityAuditConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
-class EntityAuditOptionsFlow(config_entries.OptionsFlow):
+class EntityAuditOptionsFlow(config_entries.OptionsFlowWithReload):
     """Update retention settings."""
-
-    def __init__(self, config_entry):
-        self.config_entry = config_entry
 
     async def async_step_init(self, user_input=None):
         if user_input is not None:
@@ -63,4 +60,3 @@ class EntityAuditOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="init", data_schema=EntityAuditConfigFlow._schema(values)
         )
-
