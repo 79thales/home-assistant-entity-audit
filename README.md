@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="brand/icon@2x.png" alt="Entity Audit icon" width="192">
+</p>
+
 # Entity Audit for Home Assistant
 
 Entity Audit is a HACS-compatible custom integration that gives administrators one searchable view of all Home Assistant entities. Auditing is opt-in per entity: only selected state changes are stored by this integration.
