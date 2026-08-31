@@ -24,14 +24,15 @@ def _manager(hass: HomeAssistant) -> EntityAuditManager:
     return hass.data[DOMAIN]["manager"]
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/list_entities"})
 @websocket_api.async_response
 async def ws_list_entities(hass, connection, msg) -> None:
     """List all known entities."""
-    connection.require_admin()
     connection.send_result(msg["id"], _manager(hass).get_entities())
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/get_history",
@@ -42,12 +43,12 @@ async def ws_list_entities(hass, connection, msg) -> None:
 @websocket_api.async_response
 async def ws_get_history(hass, connection, msg) -> None:
     """Return an entity's audit history."""
-    connection.require_admin()
     connection.send_result(
         msg["id"], _manager(hass).get_history(msg["entity_id"], msg["limit"])
     )
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/set_logging",
@@ -58,11 +59,11 @@ async def ws_get_history(hass, connection, msg) -> None:
 @websocket_api.async_response
 async def ws_set_logging(hass, connection, msg) -> None:
     """Toggle auditing for an entity."""
-    connection.require_admin()
     _manager(hass).set_logging(msg["entity_id"], msg["enabled"])
     connection.send_result(msg["id"], {"success": True})
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/clear_history",
@@ -72,6 +73,5 @@ async def ws_set_logging(hass, connection, msg) -> None:
 @websocket_api.async_response
 async def ws_clear_history(hass, connection, msg) -> None:
     """Clear an entity's records."""
-    connection.require_admin()
     _manager(hass).clear_history(msg["entity_id"])
     connection.send_result(msg["id"], {"success": True})
