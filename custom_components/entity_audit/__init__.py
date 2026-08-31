@@ -15,6 +15,8 @@ from .const import (
     DEFAULT_MAX_EVENTS,
     DEFAULT_RETENTION_DAYS,
     DOMAIN,
+    PANEL_ELEMENT,
+    PANEL_MODULE_URL,
     PANEL_URL,
 )
 from .manager import EntityAuditManager
@@ -48,10 +50,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         frontend_url_path=DOMAIN,
         config={
             "_panel_custom": {
-                "name": "entity-audit-panel",
+                "name": PANEL_ELEMENT,
                 "embed_iframe": True,
                 "trust_external": False,
-                "js_url": PANEL_URL,
+                "js_url": PANEL_MODULE_URL,
             }
         },
         require_admin=True,
