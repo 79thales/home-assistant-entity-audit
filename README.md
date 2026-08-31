@@ -9,7 +9,10 @@ Entity Audit is a HACS-compatible custom integration that gives administrators o
 ## Features
 
 - lists runtime and entity-registry entities, including disabled and missing entries;
-- searches by friendly name, `entity_id`, or source integration;
+- searches by friendly name, device, `entity_id`, or source integration;
+- filters entities by their Home Assistant device, including entities without a device;
+- exports the currently filtered entity list to a UTF-8 CSV file;
+- opens the native Home Assistant entity detail by clicking its current state;
 - flags current `unavailable`, `unknown`, and missing states;
 - enables or disables audit logging separately for every entity;
 - records state transitions, problem starts, and recoveries;

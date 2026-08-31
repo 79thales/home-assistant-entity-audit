@@ -7,6 +7,7 @@ from typing import Any
 
 from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
@@ -100,6 +101,7 @@ class EntityAuditManager:
     def get_entities(self) -> list[dict[str, Any]]:
         """Return registry and runtime entities, including registry-only entries."""
         registry = er.async_get(self.hass)
+        device_registry = dr.async_get(self.hass)
         registry_entries = {entry.entity_id: entry for entry in registry.entities.values()}
         entity_ids = set(registry_entries) | set(self.hass.states.async_entity_ids())
         result: list[dict[str, Any]] = []
@@ -118,12 +120,20 @@ class EntityAuditManager:
                 name = er.async_get_full_entity_name(self.hass, entry)
                 name = name or entry.name or entry.original_name
 
+            device_id = entry.device_id if entry else None
+            device = device_registry.async_get(device_id) if device_id else None
+            device_name = None
+            if device:
+                device_name = device.name_by_user or device.name or device.model or device.id
+
             result.append(
                 {
                     "entity_id": entity_id,
                     "name": name or entity_id,
                     "domain": entity_id.partition(".")[0],
                     "platform": entry.platform if entry else None,
+                    "device_id": device_id,
+                    "device_name": device_name,
                     "state": state.state if state else None,
                     "disabled": disabled,
                     "logging": entity_id in self._enabled,
