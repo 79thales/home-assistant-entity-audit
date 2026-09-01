@@ -16,6 +16,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_list_entities)
     websocket_api.async_register_command(hass, ws_get_history)
     websocket_api.async_register_command(hass, ws_set_logging)
+    websocket_api.async_register_command(hass, ws_set_logging_bulk)
     websocket_api.async_register_command(hass, ws_clear_history)
 
 
@@ -61,6 +62,22 @@ async def ws_set_logging(hass, connection, msg) -> None:
     """Toggle auditing for an entity."""
     _manager(hass).set_logging(msg["entity_id"], msg["enabled"])
     connection.send_result(msg["id"], {"success": True})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/set_logging_bulk",
+        vol.Required("entity_ids"): vol.All([str], vol.Length(min=1, max=10000)),
+        vol.Required("enabled"): bool,
+    }
+)
+@websocket_api.async_response
+async def ws_set_logging_bulk(hass, connection, msg) -> None:
+    """Toggle auditing for multiple entities."""
+    entity_ids = list(dict.fromkeys(msg["entity_ids"]))
+    _manager(hass).set_logging_bulk(entity_ids, msg["enabled"])
+    connection.send_result(msg["id"], {"success": True, "count": len(entity_ids)})
 
 
 @websocket_api.require_admin

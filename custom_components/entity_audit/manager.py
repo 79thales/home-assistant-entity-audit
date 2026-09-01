@@ -7,6 +7,7 @@ from typing import Any
 
 from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
@@ -86,6 +87,15 @@ class EntityAuditManager:
         self._store.async_delay_save(self._data, 1)
 
     @callback
+    def set_logging_bulk(self, entity_ids: list[str], enabled: bool) -> None:
+        """Enable or disable future audit records for multiple entities."""
+        if enabled:
+            self._enabled.update(entity_ids)
+        else:
+            self._enabled.difference_update(entity_ids)
+        self._store.async_delay_save(self._data, 1)
+
+    @callback
     def clear_history(self, entity_id: str) -> None:
         """Delete stored audit records for one entity."""
         self._history.pop(entity_id, None)
@@ -102,6 +112,7 @@ class EntityAuditManager:
         """Return registry and runtime entities, including registry-only entries."""
         registry = er.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
+        area_registry = ar.async_get(self.hass)
         registry_entries = {entry.entity_id: entry for entry in registry.entities.values()}
         entity_ids = set(registry_entries) | set(self.hass.states.async_entity_ids())
         result: list[dict[str, Any]] = []
@@ -126,6 +137,11 @@ class EntityAuditManager:
             if device:
                 device_name = device.name_by_user or device.name or device.model or device.id
 
+            area_id = entry.area_id if entry and entry.area_id else None
+            if area_id is None and device:
+                area_id = dr.async_get_effective_area_id(self.hass, device)
+            area = area_registry.async_get_area(area_id) if area_id else None
+
             result.append(
                 {
                     "entity_id": entity_id,
@@ -134,6 +150,10 @@ class EntityAuditManager:
                     "platform": entry.platform if entry else None,
                     "device_id": device_id,
                     "device_name": device_name,
+                    "manufacturer": device.manufacturer if device else None,
+                    "model": device.model if device else None,
+                    "area_id": area_id,
+                    "area_name": area.name if area else None,
                     "state": state.state if state else None,
                     "disabled": disabled,
                     "logging": entity_id in self._enabled,
