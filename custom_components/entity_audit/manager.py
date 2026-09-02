@@ -138,8 +138,15 @@ class EntityAuditManager:
                 device_name = device.name_by_user or device.name or device.model or device.id
 
             area_id = entry.area_id if entry and entry.area_id else None
+            parent_device_id = getattr(device, "parent_device_id", None) if device else None
+            parent_device = (
+                device_registry.async_get(parent_device_id) if parent_device_id else None
+            )
+            hardware_device = parent_device or device
             if area_id is None and device:
-                area_id = dr.async_get_effective_area_id(self.hass, device)
+                area_id = device.area_id or (
+                    parent_device.area_id if parent_device else None
+                )
             area = area_registry.async_get_area(area_id) if area_id else None
 
             result.append(
@@ -150,8 +157,16 @@ class EntityAuditManager:
                     "platform": entry.platform if entry else None,
                     "device_id": device_id,
                     "device_name": device_name,
-                    "manufacturer": device.manufacturer if device else None,
-                    "model": device.model if device else None,
+                    "manufacturer": (
+                        getattr(hardware_device, "manufacturer", None)
+                        if hardware_device
+                        else None
+                    ),
+                    "model": (
+                        getattr(hardware_device, "model", None)
+                        if hardware_device
+                        else None
+                    ),
                     "area_id": area_id,
                     "area_name": area.name if area else None,
                     "state": state.state if state else None,
