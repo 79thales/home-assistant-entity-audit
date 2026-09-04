@@ -139,7 +139,11 @@ class EntityAuditManager:
                 device_name = device.name_by_user or device.name or device.model or device.id
 
             area_id = entry.area_id if entry and entry.area_id else None
-            parent_device_id = getattr(device, "parent_device_id", None) if device else None
+            parent_device_id = None
+            if device:
+                parent_device_id = getattr(
+                    device, "parent_device_id", None
+                ) or getattr(device, "via_device_id", None)
             parent_device = (
                 device_registry.async_get(parent_device_id) if parent_device_id else None
             )
