@@ -50,7 +50,7 @@ class EntityAuditConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
-class EntityAuditOptionsFlow(config_entries.OptionsFlowWithReload):
+class EntityAuditOptionsFlow(config_entries.OptionsFlow):
     """Update retention settings."""
 
     async def async_step_init(self, user_input=None):

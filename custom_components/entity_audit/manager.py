@@ -128,7 +128,8 @@ class EntityAuditManager:
                 problem = None if disabled else "missing"
                 name = None
             if not name and entry:
-                name = er.async_get_full_entity_name(self.hass, entry)
+                full_name = getattr(er, "async_get_full_entity_name", None)
+                name = full_name(self.hass, entry) if full_name else None
                 name = name or entry.name or entry.original_name
 
             device_id = entry.device_id if entry else None

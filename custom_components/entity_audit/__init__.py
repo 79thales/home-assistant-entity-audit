@@ -23,6 +23,11 @@ from .manager import EntityAuditManager
 from .websocket import async_register_websocket_commands
 
 
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload Entity Audit after its options change."""
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Entity Audit from a config entry."""
     values = {**entry.data, **entry.options}
@@ -34,6 +39,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await manager.async_start()
     runtime = hass.data.setdefault(DOMAIN, {})
     runtime["manager"] = manager
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     if not runtime.get("api_registered"):
         frontend_path = Path(__file__).parent / "frontend"
