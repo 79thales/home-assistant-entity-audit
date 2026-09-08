@@ -380,6 +380,6 @@ class EntityAuditPanel extends HTMLElement {
   }
 }
 
-if (!customElements.get("entity-audit-panel-v031")) {
-  customElements.define("entity-audit-panel-v031", EntityAuditPanel);
+if (!customElements.get("entity-audit-panel-v034")) {
+  customElements.define("entity-audit-panel-v034", EntityAuditPanel);
 }

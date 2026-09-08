@@ -7,6 +7,17 @@ on:
     - cron: "0 5 * * 1"
 
 jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test frontend integration contract
+        run: python -m unittest discover -s tests -v
+      - name: Validate Python syntax
+        run: python -m compileall -q custom_components/entity_audit
+      - name: Validate JavaScript syntax
+        run: node --check custom_components/entity_audit/frontend/entity-audit-panel.js
+
   hacs:
     runs-on: ubuntu-latest
     steps:
@@ -20,4 +31,3 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: home-assistant/actions/hassfest@master
-
