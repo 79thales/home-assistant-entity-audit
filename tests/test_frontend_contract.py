@@ -43,12 +43,16 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIsNotNone(match, "PANEL_MODULE_URL must contain a cache version")
         self.assertEqual(manifest["version"], match.group(1))
 
-    def test_print_labels_are_limited_to_unique_devices_with_an_ip(self) -> None:
+    def test_print_labels_are_limited_to_unique_ip_addresses(self) -> None:
         frontend = FRONTEND_FILE.read_text(encoding="utf-8")
 
         self.assertIn('id="print-labels"', frontend)
         self.assertIn("!entity.device_id || !entity.ip_address", frontend)
-        self.assertIn("devices.has(entity.device_id)", frontend)
+        self.assertIn("devices.get(entity.ip_address)", frontend)
+        self.assertIn("devices.set(entity.ip_address, entity)", frontend)
+        self.assertIn("manufacturerLabel", frontend)
+        self.assertIn('id="label-width"', frontend)
+        self.assertIn('id="label-height"', frontend)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,8 @@ class EntityAuditPanel extends HTMLElement {
     this._selected = null;
     this._history = [];
     this._loading = false;
+    this._labelWidth = 60;
+    this._labelHeight = 38;
   }
 
   set hass(value) {
@@ -147,8 +149,11 @@ class EntityAuditPanel extends HTMLElement {
   _labelDevices(rows) {
     const devices = new Map();
     for (const entity of rows) {
-      if (!entity.device_id || !entity.ip_address || devices.has(entity.device_id)) continue;
-      devices.set(entity.device_id, entity);
+      if (!entity.device_id || !entity.ip_address) continue;
+      const existing = devices.get(entity.ip_address);
+      if (!existing || (!existing.mac_address && entity.mac_address)) {
+        devices.set(entity.ip_address, entity);
+      }
     }
     return [...devices.values()].sort((a, b) =>
       (a.device_name || a.name).localeCompare(b.device_name || b.name)
@@ -165,6 +170,9 @@ class EntityAuditPanel extends HTMLElement {
       return;
     }
 
+    const labelWidth = Math.min(190, Math.max(20, Number(this._labelWidth) || 60));
+    const labelHeight = Math.min(280, Math.max(20, Number(this._labelHeight) || 38));
+
     const printWindow = window.open("", "_blank");
     if (!printWindow) {
       alert(this._t(
@@ -175,6 +183,7 @@ class EntityAuditPanel extends HTMLElement {
     }
     printWindow.opener = null;
     const title = this._t("Štítky zařízení", "Device labels");
+    const manufacturerLabel = this._t("Výrobce", "Manufacturer");
     const areaLabel = this._t("Umístění", "Area");
     const unavailable = this._t("neuvedeno", "not available");
     const labels = devices.map((entity) => `
@@ -183,6 +192,7 @@ class EntityAuditPanel extends HTMLElement {
         <dl>
           <div><dt>IP</dt><dd>${this._escape(entity.ip_address)}</dd></div>
           <div><dt>MAC</dt><dd>${this._escape(entity.mac_address || unavailable)}</dd></div>
+          <div><dt>${this._escape(manufacturerLabel)}</dt><dd>${this._escape(entity.manufacturer || unavailable)}</dd></div>
           <div><dt>${this._escape(areaLabel)}</dt><dd>${this._escape(entity.area_name || unavailable)}</dd></div>
         </dl>
       </article>`).join("");
@@ -195,8 +205,8 @@ class EntityAuditPanel extends HTMLElement {
       @page { size: A4 portrait; margin: 8mm; }
       * { box-sizing: border-box; }
       body { font-family: Arial, sans-serif; margin: 0; color: #111; }
-      .labels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3mm; }
-      .label { border: .3mm solid #111; min-height: 38mm; padding: 3mm; break-inside: avoid; }
+      .labels { display: grid; grid-template-columns: repeat(auto-fill, ${labelWidth}mm); grid-auto-rows: ${labelHeight}mm; gap: 3mm; }
+      .label { border: .3mm solid #111; height: ${labelHeight}mm; padding: 3mm; break-inside: avoid; overflow: hidden; }
       h1 { font-size: 13pt; line-height: 1.12; margin: 0 0 3mm; overflow-wrap: anywhere; }
       dl { margin: 0; font-size: 9pt; }
       dl div { display: flex; gap: 2mm; margin: 1mm 0; }
@@ -301,6 +311,8 @@ class EntityAuditPanel extends HTMLElement {
         .search, select { border:1px solid var(--divider-color); border-radius:9px; padding:11px 13px; color:var(--primary-text-color); background:var(--card-background-color); min-width:0; }
         .device-filter { min-width:260px; max-width:460px; }
         label.filter { display:flex; gap:7px; align-items:center; white-space:nowrap; }
+        label.label-size { display:flex; align-items:center; gap:5px; white-space:nowrap; }
+        .label-size input { width:64px; border:1px solid var(--divider-color); border-radius:7px; padding:8px; color:var(--primary-text-color); background:var(--card-background-color); }
         .table-wrap { overflow:auto; background:var(--card-background-color); border-radius:12px; box-shadow:var(--ha-card-box-shadow); }
         table { width:100%; border-collapse:collapse; }
         th, td { padding:11px 13px; text-align:left; border-bottom:1px solid var(--divider-color); }
@@ -353,6 +365,7 @@ class EntityAuditPanel extends HTMLElement {
           <button id="bulk-enable">${this._t("Auditovat zobrazené", "Audit displayed")}</button>
           <button id="bulk-disable">${this._t("Vypnout audit", "Disable audit")}</button>
           <button id="export">${this._t("Export CSV", "Export CSV")}</button>
+          <label class="label-size">${this._t("Štítek (mm)", "Label (mm)")} <input id="label-width" type="number" min="20" max="190" step="1" value="${this._labelWidth}" aria-label="${this._t("Šířka štítku v milimetrech", "Label width in millimeters")}"> × <input id="label-height" type="number" min="20" max="280" step="1" value="${this._labelHeight}" aria-label="${this._t("Výška štítku v milimetrech", "Label height in millimeters")}"></label>
           <button id="print-labels">${this._t("Tisk štítků (PDF)", "Print labels (PDF)")}</button>
         </div>
         <div class="filters">
@@ -437,6 +450,8 @@ class EntityAuditPanel extends HTMLElement {
     this.shadowRoot.querySelector("#bulk-enable")?.addEventListener("click", () => this._bulkSet(rows, true));
     this.shadowRoot.querySelector("#bulk-disable")?.addEventListener("click", () => this._bulkSet(rows, false));
     this.shadowRoot.querySelector("#export")?.addEventListener("click", () => this._exportCsv(rows));
+    this.shadowRoot.querySelector("#label-width")?.addEventListener("input", (event) => { this._labelWidth = event.target.value; });
+    this.shadowRoot.querySelector("#label-height")?.addEventListener("input", (event) => { this._labelHeight = event.target.value; });
     this.shadowRoot.querySelector("#print-labels")?.addEventListener("click", () => this._printLabels(rows));
     this.shadowRoot.querySelectorAll(".toggle").forEach((input) => input.addEventListener("change", () => this._toggle(rows[Number(input.dataset.index)], input.checked)));
     this.shadowRoot.querySelectorAll(".history-button").forEach((button) => button.addEventListener("click", () => this._open(rows[Number(button.dataset.index)])));
