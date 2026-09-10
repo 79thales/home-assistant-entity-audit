@@ -9,7 +9,7 @@ Entity Audit is a HACS-compatible custom integration that gives administrators o
 ## Features
 
 - lists runtime entities and entries from the entity registry, including disabled and registry-only entries;
-- searches by friendly name, device, manufacturer, model, area, `entity_id`, or source integration;
+- searches by friendly name, device, manufacturer, model, area, IP address when Home Assistant provides one, `entity_id`, or source integration;
 - groups entities by device, manufacturer (for example Shelly), model, integration, area, or entity domain;
 - filters by device, manufacturer, model, integration, area, entity domain, problem, and audit status;
 - enables or disables auditing in bulk for the currently filtered entities;
@@ -39,7 +39,7 @@ Until the repository is accepted into the HACS default catalog, add `https://git
 
 ## Storage and privacy
 
-The default retention is 30 days and 500 events per entity. The enabled-entity list and audit history are stored locally in Home Assistant's `.storage/entity_audit.storage` file. Each audit record contains a timestamp, event category, and old/new state values; entity attributes are not stored in audit history. The inventory reads current Home Assistant registry and runtime data for display, but the integration does not send it to an external service.
+The default retention is 30 days and 500 events per entity. The enabled-entity list and audit history are stored locally in Home Assistant's `.storage/entity_audit.storage` file. Each audit record contains a timestamp, event category, and old/new state values; entity attributes are not stored in audit history. For the current inventory display only, an IP address may be shown when Home Assistant already supplies a literal IP in an entity attribute or a device configuration URL; no hostname lookup or network discovery is performed. The integration does not send inventory data to an external service.
 
 Disabling auditing stops future recording without deleting existing history. Stored records remain subject to the configured age and per-entity limits and can also be deleted manually from the panel.
 

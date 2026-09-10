@@ -115,7 +115,7 @@ class EntityAuditPanel extends HTMLElement {
   }
 
   _exportCsv(rows) {
-    const headers = ["name", "entity_id", "domain", "device", "manufacturer", "model", "area", "integration", "state", "problem", "audited", "last_changed"];
+    const headers = ["name", "entity_id", "domain", "device", "manufacturer", "model", "area", "ip_address", "integration", "state", "problem", "audited", "last_changed"];
     const lines = [headers.map((value) => this._csvCell(value)).join(";")];
     for (const entity of rows) {
       lines.push([
@@ -126,6 +126,7 @@ class EntityAuditPanel extends HTMLElement {
         entity.manufacturer,
         entity.model,
         entity.area_name,
+        entity.ip_address,
         entity.platform,
         entity.state,
         entity.problem,
@@ -197,7 +198,7 @@ class EntityAuditPanel extends HTMLElement {
     const areas = this._options("area_id", "area_name");
     const domains = this._options("domain");
     const rows = this._entities.filter((entity) => {
-      const matches = !query || `${entity.name} ${entity.entity_id} ${entity.device_name || ""} ${entity.manufacturer || ""} ${entity.model || ""} ${entity.area_name || ""} ${entity.platform || ""}`.toLocaleLowerCase().includes(query);
+      const matches = !query || `${entity.name} ${entity.entity_id} ${entity.device_name || ""} ${entity.manufacturer || ""} ${entity.model || ""} ${entity.area_name || ""} ${entity.ip_address || ""} ${entity.platform || ""}`.toLocaleLowerCase().includes(query);
       const deviceMatches = !this._device
         || (this._device === "__none__" ? !entity.device_id : entity.device_id === this._device);
       const manufacturerMatches = !this._manufacturer
@@ -335,7 +336,7 @@ class EntityAuditPanel extends HTMLElement {
                 return `<tr>
                   <td><div class="name">${this._escape(entity.name)}</div><div class="entity-id">${this._escape(entity.entity_id)}${entity.disabled ? ` · ${this._t("vypnuto", "disabled")}` : ""}</div></td>
                   <td><button class="state-button" data-index="${index}" title="${this._t("Zobrazit detail entity", "Show entity details")}">${entity.problem ? `<span class="badge problem">${this._escape(entity.problem)}</span>` : `<span class="badge">${this._escape(entity.state ?? "—")}</span>`}</button></td>
-                  <td><div>${this._escape(entity.device_name || this._t("Bez zařízení", "No device"))}</div><div class="muted">${this._escape([entity.manufacturer, entity.model, entity.area_name].filter(Boolean).join(" · "))}</div></td>
+                  <td><div>${this._escape(entity.device_name || this._t("Bez zařízení", "No device"))}</div><div class="muted">${this._escape([entity.manufacturer, entity.model, entity.area_name, entity.ip_address ? `IP: ${entity.ip_address}` : ""].filter(Boolean).join(" · "))}</div></td>
                   <td>${this._escape(entity.platform || "—")}</td>
                   <td><input class="switch toggle" data-index="${index}" type="checkbox" ${entity.logging ? "checked" : ""} aria-label="Audit ${this._escape(entity.entity_id)}"></td>
                   <td><button class="link history-button" data-index="${index}">${entity.event_count} ${this._t("záznamů", "events")}</button></td>
