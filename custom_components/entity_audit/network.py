@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from ipaddress import ip_address
 from typing import Any
 from urllib.parse import urlparse
@@ -36,3 +36,16 @@ def find_ip_address(
         return _as_ip_address(urlparse(configuration_url).hostname)
 
     return None
+
+
+def find_mac_address(connections: Iterable[tuple[str, str]] | None) -> str | None:
+    """Return the first normalized MAC address from device registry connections."""
+    if not connections:
+        return None
+
+    mac_addresses = sorted(
+        value
+        for connection_type, value in connections
+        if connection_type == "mac" and isinstance(value, str)
+    )
+    return mac_addresses[0] if mac_addresses else None

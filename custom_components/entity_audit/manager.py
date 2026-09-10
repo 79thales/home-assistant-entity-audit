@@ -14,7 +14,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import PROBLEM_STATES, STORAGE_KEY, STORAGE_VERSION
-from .network import find_ip_address
+from .network import find_ip_address, find_mac_address
 
 
 class EntityAuditManager:
@@ -178,6 +178,9 @@ class EntityAuditManager:
                     "ip_address": find_ip_address(
                         state.attributes if state else None,
                         getattr(device, "configuration_url", None) if device else None,
+                    ),
+                    "mac_address": find_mac_address(
+                        getattr(device, "connections", None) if device else None
                     ),
                     "state": state.state if state else None,
                     "disabled": disabled,

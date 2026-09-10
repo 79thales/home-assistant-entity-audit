@@ -115,7 +115,7 @@ class EntityAuditPanel extends HTMLElement {
   }
 
   _exportCsv(rows) {
-    const headers = ["name", "entity_id", "domain", "device", "manufacturer", "model", "area", "ip_address", "integration", "state", "problem", "audited", "last_changed"];
+    const headers = ["name", "entity_id", "domain", "device", "manufacturer", "model", "area", "ip_address", "mac_address", "integration", "state", "problem", "audited", "last_changed"];
     const lines = [headers.map((value) => this._csvCell(value)).join(";")];
     for (const entity of rows) {
       lines.push([
@@ -127,6 +127,7 @@ class EntityAuditPanel extends HTMLElement {
         entity.model,
         entity.area_name,
         entity.ip_address,
+        entity.mac_address,
         entity.platform,
         entity.state,
         entity.problem,
@@ -141,6 +142,68 @@ class EntityAuditPanel extends HTMLElement {
     anchor.download = `entity-audit-${new Date().toISOString().slice(0, 10)}.csv`;
     anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  _labelDevices(rows) {
+    const devices = new Map();
+    for (const entity of rows) {
+      if (!entity.device_id || !entity.ip_address || devices.has(entity.device_id)) continue;
+      devices.set(entity.device_id, entity);
+    }
+    return [...devices.values()].sort((a, b) =>
+      (a.device_name || a.name).localeCompare(b.device_name || b.name)
+    );
+  }
+
+  _printLabels(rows) {
+    const devices = this._labelDevices(rows);
+    if (!devices.length) {
+      alert(this._t(
+        "Mezi zobrazenými zařízeními není žádné s dostupnou IP adresou.",
+        "None of the displayed devices has an available IP address."
+      ));
+      return;
+    }
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      alert(this._t(
+        "Pro vytvoření štítků povolte v prohlížeči vyskakovací okna.",
+        "Allow pop-ups in the browser to create labels."
+      ));
+      return;
+    }
+    printWindow.opener = null;
+    const title = this._t("Štítky zařízení", "Device labels");
+    const areaLabel = this._t("Umístění", "Area");
+    const unavailable = this._t("neuvedeno", "not available");
+    const labels = devices.map((entity) => `
+      <article class="label">
+        <h1>${this._escape(entity.device_name || entity.name)}</h1>
+        <dl>
+          <div><dt>IP</dt><dd>${this._escape(entity.ip_address)}</dd></div>
+          <div><dt>MAC</dt><dd>${this._escape(entity.mac_address || unavailable)}</dd></div>
+          <div><dt>${this._escape(areaLabel)}</dt><dd>${this._escape(entity.area_name || unavailable)}</dd></div>
+        </dl>
+      </article>`).join("");
+
+    printWindow.addEventListener("load", () => {
+      printWindow.focus();
+      printWindow.print();
+    }, { once: true });
+    printWindow.document.write(`<!doctype html><html lang="${this._hass?.language || "en"}"><head><meta charset="utf-8"><title>${this._escape(title)}</title><style>
+      @page { size: A4 portrait; margin: 8mm; }
+      * { box-sizing: border-box; }
+      body { font-family: Arial, sans-serif; margin: 0; color: #111; }
+      .labels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3mm; }
+      .label { border: .3mm solid #111; min-height: 38mm; padding: 3mm; break-inside: avoid; }
+      h1 { font-size: 13pt; line-height: 1.12; margin: 0 0 3mm; overflow-wrap: anywhere; }
+      dl { margin: 0; font-size: 9pt; }
+      dl div { display: flex; gap: 2mm; margin: 1mm 0; }
+      dt { color: #444; min-width: 20mm; }
+      dd { font-family: "Courier New", monospace; font-weight: bold; margin: 0; overflow-wrap: anywhere; }
+    </style></head><body><main class="labels">${labels}</main></body></html>`);
+    printWindow.document.close();
   }
 
   _escape(value) {
@@ -198,7 +261,7 @@ class EntityAuditPanel extends HTMLElement {
     const areas = this._options("area_id", "area_name");
     const domains = this._options("domain");
     const rows = this._entities.filter((entity) => {
-      const matches = !query || `${entity.name} ${entity.entity_id} ${entity.device_name || ""} ${entity.manufacturer || ""} ${entity.model || ""} ${entity.area_name || ""} ${entity.ip_address || ""} ${entity.platform || ""}`.toLocaleLowerCase().includes(query);
+      const matches = !query || `${entity.name} ${entity.entity_id} ${entity.device_name || ""} ${entity.manufacturer || ""} ${entity.model || ""} ${entity.area_name || ""} ${entity.ip_address || ""} ${entity.mac_address || ""} ${entity.platform || ""}`.toLocaleLowerCase().includes(query);
       const deviceMatches = !this._device
         || (this._device === "__none__" ? !entity.device_id : entity.device_id === this._device);
       const manufacturerMatches = !this._manufacturer
@@ -290,6 +353,7 @@ class EntityAuditPanel extends HTMLElement {
           <button id="bulk-enable">${this._t("Auditovat zobrazené", "Audit displayed")}</button>
           <button id="bulk-disable">${this._t("Vypnout audit", "Disable audit")}</button>
           <button id="export">${this._t("Export CSV", "Export CSV")}</button>
+          <button id="print-labels">${this._t("Tisk štítků (PDF)", "Print labels (PDF)")}</button>
         </div>
         <div class="filters">
           <select id="device-filter" class="device-filter" aria-label="${this._t("Filtrovat podle zařízení", "Filter by device")}">
@@ -336,7 +400,7 @@ class EntityAuditPanel extends HTMLElement {
                 return `<tr>
                   <td><div class="name">${this._escape(entity.name)}</div><div class="entity-id">${this._escape(entity.entity_id)}${entity.disabled ? ` · ${this._t("vypnuto", "disabled")}` : ""}</div></td>
                   <td><button class="state-button" data-index="${index}" title="${this._t("Zobrazit detail entity", "Show entity details")}">${entity.problem ? `<span class="badge problem">${this._escape(entity.problem)}</span>` : `<span class="badge">${this._escape(entity.state ?? "—")}</span>`}</button></td>
-                  <td><div>${this._escape(entity.device_name || this._t("Bez zařízení", "No device"))}</div><div class="muted">${this._escape([entity.manufacturer, entity.model, entity.area_name, entity.ip_address ? `IP: ${entity.ip_address}` : ""].filter(Boolean).join(" · "))}</div></td>
+                  <td><div>${this._escape(entity.device_name || this._t("Bez zařízení", "No device"))}</div><div class="muted">${this._escape([entity.manufacturer, entity.model, entity.area_name, entity.ip_address ? `IP: ${entity.ip_address}` : "", entity.mac_address ? `MAC: ${entity.mac_address}` : ""].filter(Boolean).join(" · "))}</div></td>
                   <td>${this._escape(entity.platform || "—")}</td>
                   <td><input class="switch toggle" data-index="${index}" type="checkbox" ${entity.logging ? "checked" : ""} aria-label="Audit ${this._escape(entity.entity_id)}"></td>
                   <td><button class="link history-button" data-index="${index}">${entity.event_count} ${this._t("záznamů", "events")}</button></td>
@@ -373,6 +437,7 @@ class EntityAuditPanel extends HTMLElement {
     this.shadowRoot.querySelector("#bulk-enable")?.addEventListener("click", () => this._bulkSet(rows, true));
     this.shadowRoot.querySelector("#bulk-disable")?.addEventListener("click", () => this._bulkSet(rows, false));
     this.shadowRoot.querySelector("#export")?.addEventListener("click", () => this._exportCsv(rows));
+    this.shadowRoot.querySelector("#print-labels")?.addEventListener("click", () => this._printLabels(rows));
     this.shadowRoot.querySelectorAll(".toggle").forEach((input) => input.addEventListener("change", () => this._toggle(rows[Number(input.dataset.index)], input.checked)));
     this.shadowRoot.querySelectorAll(".history-button").forEach((button) => button.addEventListener("click", () => this._open(rows[Number(button.dataset.index)])));
     this.shadowRoot.querySelectorAll(".state-button").forEach((button) => button.addEventListener("click", () => this._showEntity(rows[Number(button.dataset.index)].entity_id)));

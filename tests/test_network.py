@@ -39,3 +39,14 @@ class FindIpAddressTest(unittest.TestCase):
         self.assertIsNone(
             NETWORK.find_ip_address({}, "http://device.example.invalid/status")
         )
+
+    def test_returns_device_registry_mac_address(self) -> None:
+        self.assertEqual(
+            NETWORK.find_mac_address(
+                {("zigbee", "00:11:22:33:44:55:66:77"), ("mac", "aa:bb:cc:dd:ee:ff")}
+            ),
+            "aa:bb:cc:dd:ee:ff",
+        )
+
+    def test_returns_none_without_a_mac_connection(self) -> None:
+        self.assertIsNone(NETWORK.find_mac_address({("zigbee", "device-id")}))
