@@ -116,6 +116,7 @@ class EntityAuditManager:
         area_registry = ar.async_get(self.hass)
         registry_entries = {entry.entity_id: entry for entry in registry.entities.values()}
         entity_ids = set(registry_entries) | set(self.hass.states.async_entity_ids())
+        config_entry_data: dict[str, Any] = {}
         result: list[dict[str, Any]] = []
 
         for entity_id in entity_ids:
@@ -135,6 +136,17 @@ class EntityAuditManager:
 
             device_id = entry.device_id if entry else None
             device = device_registry.async_get(device_id) if device_id else None
+            entry_config_data = None
+            config_entry_id = entry.config_entry_id if entry else None
+            if config_entry_id:
+                if config_entry_id not in config_entry_data:
+                    config_entry = self.hass.config_entries.async_get_entry(
+                        config_entry_id
+                    )
+                    config_entry_data[config_entry_id] = (
+                        config_entry.data if config_entry else None
+                    )
+                entry_config_data = config_entry_data[config_entry_id]
             device_name = None
             if device:
                 device_name = device.name_by_user or device.name or device.model or device.id
@@ -178,6 +190,7 @@ class EntityAuditManager:
                     "ip_address": find_ip_address(
                         state.attributes if state else None,
                         getattr(device, "configuration_url", None) if device else None,
+                        entry_config_data,
                     ),
                     "mac_address": find_mac_address(
                         getattr(device, "connections", None) if device else None

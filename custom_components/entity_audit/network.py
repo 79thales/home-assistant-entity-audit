@@ -20,7 +20,9 @@ def _as_ip_address(value: object) -> str | None:
 
 
 def find_ip_address(
-    attributes: Mapping[str, Any] | None, configuration_url: str | None
+    attributes: Mapping[str, Any] | None,
+    configuration_url: str | None,
+    config_entry_data: Mapping[str, Any] | None = None,
 ) -> str | None:
     """Return an IP address already supplied by Home Assistant, if available.
 
@@ -28,8 +30,13 @@ def find_ip_address(
     only for the current inventory response and is never written to audit history.
     """
     if attributes:
-        for attribute in ("ip_address", "ip", "host"):
+        for attribute in ("ip_address", "ip", "host", "address"):
             if address := _as_ip_address(attributes.get(attribute)):
+                return address
+
+    if config_entry_data:
+        for attribute in ("ip_address", "ip", "host", "address"):
+            if address := _as_ip_address(config_entry_data.get(attribute)):
                 return address
 
     if isinstance(configuration_url, str):

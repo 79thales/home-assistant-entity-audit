@@ -34,10 +34,27 @@ class FindIpAddressTest(unittest.TestCase):
             "192.168.10.26",
         )
 
+    def test_accepts_literal_ip_from_config_entry_host(self) -> None:
+        self.assertEqual(
+            NETWORK.find_ip_address(
+                {}, "https://www.semsportal.com", {"host": "192.168.10.27"}
+            ),
+            "192.168.10.27",
+        )
+
+    def test_accepts_literal_ip_from_config_entry_address(self) -> None:
+        self.assertEqual(
+            NETWORK.find_ip_address({}, None, {"address": "192.168.10.28"}),
+            "192.168.10.28",
+        )
+
     def test_does_not_resolve_hostnames_or_return_invalid_values(self) -> None:
         self.assertIsNone(NETWORK.find_ip_address({"host": "shelly.local"}, None))
         self.assertIsNone(
             NETWORK.find_ip_address({}, "http://device.example.invalid/status")
+        )
+        self.assertIsNone(
+            NETWORK.find_ip_address({}, None, {"host": "goodwe.local"})
         )
 
     def test_returns_device_registry_mac_address(self) -> None:
