@@ -27,6 +27,9 @@ class EntityAuditPanel extends HTMLElement {
     this._scannerOpen = false;
     this._scannerDialog = null;
     this._scannerStream = null;
+    this._cameraWaitTimer = null;
+    this._cameraWaitSeconds = 5;
+    this._scannerTimedOut = false;
     this._scannerFrame = null;
     this._scannerCanvas = null;
     this._scannerError = null;
@@ -280,9 +283,12 @@ class EntityAuditPanel extends HTMLElement {
       labels_pdf_failed: this._t("Vytvoření PDF štítků selhalo", "Label PDF creation failed"),
       labels_pdf_share_failed: this._t("Sdílení PDF štítků selhalo", "Label PDF sharing failed"),
       qr_scanner_opened: this._t("Otevřena čtečka QR štítků", "QR label scanner opened"),
+      qr_camera_environment: this._t("Diagnostika prostředí kamery", "Camera environment diagnostic"),
       qr_camera_requested: this._t("Vyžádán přístup ke kameře", "Camera access requested"),
       qr_camera_started: this._t("Kamera QR čtečky spuštěna", "QR scanner camera started"),
       qr_camera_failed: this._t("Kamera QR čtečky selhala", "QR scanner camera failed"),
+      qr_camera_timed_out: this._t("Čekání na kameru vypršelo", "Camera wait timed out"),
+      qr_camera_wait_updated: this._t("Změněna doba čekání na kameru", "Camera wait duration changed"),
       qr_reader_failed: this._t("Načtení QR čtečky selhalo", "QR reader loading failed"),
       qr_label_scanned: this._t("Načten QR štítek", "QR label scanned"),
       qr_label_rejected: this._t("Odmítnut neplatný QR kód", "Invalid QR code rejected"),
@@ -526,7 +532,49 @@ class EntityAuditPanel extends HTMLElement {
     );
   }
 
+  _hasLiveCameraApi() {
+    return Boolean(
+      window.isSecureContext
+      && typeof navigator.mediaDevices?.getUserMedia === "function"
+    );
+  }
+
+  _cameraWaitSecondsValue() {
+    return Math.min(30, Math.max(1, Number(this._cameraWaitSeconds) || 5));
+  }
+
+  _clearCameraWaitTimer() {
+    if (this._cameraWaitTimer !== null) clearTimeout(this._cameraWaitTimer);
+    this._cameraWaitTimer = null;
+  }
+
+  _scheduleCameraWaitTimer() {
+    this._clearCameraWaitTimer();
+    const waitSeconds = this._cameraWaitSecondsValue();
+    this._cameraWaitTimer = setTimeout(() => {
+      this._cameraWaitTimer = null;
+      if (!this._scannerOpen || !this._scannerStarting) return;
+      this._scannerStarting = false;
+      this._scannerTimedOut = true;
+      this._scannerError = this._t(
+        `Kamera se během ${waitSeconds} s neotevřela. Zkuste ji znovu nebo načtěte QR kód z fotografie.`,
+        `The camera did not open within ${waitSeconds} seconds. Try again or scan a QR-code photo.`
+      );
+      this._recordActivity("qr_camera_timed_out", "error", `wait_seconds=${waitSeconds}`);
+      this._renderScannerDialog();
+    }, waitSeconds * 1000);
+  }
+
+  _setCameraWaitSeconds(value) {
+    this._cameraWaitSeconds = Math.min(30, Math.max(1, Number(value) || 5));
+    this._recordActivity("qr_camera_wait_updated", "info", `wait_seconds=${this._cameraWaitSecondsValue()}`);
+    if (this._scannerStarting) this._scheduleCameraWaitTimer();
+    this._renderScannerDialog();
+  }
+
   _scannerDialogContent() {
+    const liveCameraAvailable = this._hasLiveCameraApi();
+    const waitSeconds = this._cameraWaitSecondsValue();
     return `<div class="dialog-head"><div><h2>${this._t("Čtečka QR štítků", "QR label scanner")}</h2><div class="entity-id">${this._t("Naskenujte štítek vytvořený aplikací Entity Audit", "Scan a label created by Entity Audit")}</div></div><button id="close-scanner" aria-label="${this._t("Zavřít čtečku", "Close scanner")}">✕</button></div>
       <div class="scanner-body">
         ${this._scanResult ? `<section class="virtual-label">
@@ -544,10 +592,9 @@ class EntityAuditPanel extends HTMLElement {
         <div class="scanner-actions">
           ${this._scanMatchedDevice ? `<button id="filter-scanned-device">${this._t("Zobrazit jeho entity", "Show its entities")}</button><a id="open-scanned-device" class="primary-link" href="/config/devices/device/${this._escape(this._scanMatchedDevice.device_id)}">${this._t("Otevřít stránku zařízení", "Open device page")}</a>` : ""}
           <button id="scan-again">${this._t("Skenovat znovu", "Scan again")}</button>
-        </div>` : `<div class="camera-stage"><video id="scanner-video" muted playsinline></video><div class="camera-guide"></div><div class="camera-hint">${this._scannerStarting ? this._t("Čekám na povolení kamery…", "Waiting for camera permission…") : this._t("Umístěte QR kód doprostřed rámečku", "Place the QR code inside the frame")}</div></div>`}
-        ${this._scannerError ? `<div class="scanner-error">${this._escape(this._scannerError)}</div>` : ""}
-        ${!window.isSecureContext ? `<div class="scanner-note">${this._t("Pro spolehlivou živou kameru na iPhonu otevřete Home Assistant přes HTTPS. QR kód lze také načíst z fotografie.", "For reliable live camera scanning on iPhone, open Home Assistant over HTTPS. You can also scan a QR-code photo.")}</div>` : ""}
-        ${!this._scanResult ? `<div class="scanner-actions"><label class="file-button">${this._scanningImage ? this._t("Zpracovávám obrázek…", "Processing image…") : this._t("Vyfotit QR kód", "Take a QR-code photo")}<input id="scan-camera-image" type="file" accept="image/*" capture="environment" ${this._scanningImage ? "disabled" : ""}></label><label class="file-button">${this._t("Vybrat obrázek", "Select an image")}<input id="scan-image" type="file" accept="image/*" ${this._scanningImage ? "disabled" : ""}></label></div>` : ""}
+        </div>` : `${liveCameraAvailable && !this._scannerTimedOut ? `<div class="camera-stage"><video id="scanner-video" muted playsinline></video><div class="camera-guide"></div><div class="camera-hint">${this._scannerStarting ? this._t(`Čekám na povolení kamery (max. ${waitSeconds} s)…`, `Waiting for camera permission (up to ${waitSeconds} s)…`) : this._t("Umístěte QR kód doprostřed rámečku", "Place the QR code inside the frame")}</div></div>` : `<div class="scanner-note">${this._scannerTimedOut ? this._t("Živá kamera se v nastaveném čase neotevřela. Můžete ji zkusit znovu nebo načíst QR kód z fotografie.", "The live camera did not open in the configured time. You can retry it or scan a QR-code photo.") : this._t("Živá kamera není v tomto připojení dostupná. Načtěte QR kód z fotografie nebo souboru.", "Live camera access is unavailable in this connection. Scan a QR-code photo or file instead.")}</div>`}`}
+          ${this._scannerError ? `<div class="scanner-error">${this._escape(this._scannerError)}</div>` : ""}
+          ${!this._scanResult ? `<label class="camera-wait">${this._t("Čekat na kameru", "Wait for camera")} <input id="camera-wait" type="number" min="1" max="30" step="1" value="${waitSeconds}" aria-label="${this._t("Doba čekání na kameru v sekundách", "Camera wait time in seconds")}"> ${this._t("s", "s")}</label><div class="scanner-actions">${this._scannerTimedOut ? `<button id="retry-camera">${this._t("Zkusit kameru znovu", "Try camera again")}</button>` : ""}<label class="file-button">${this._scanningImage ? this._t("Zpracovávám obrázek…", "Processing image…") : this._t("Vyfotit QR kód", "Take a QR-code photo")}<input id="scan-camera-image" type="file" accept="image/*" capture="environment" ${this._scanningImage ? "disabled" : ""}></label><label class="file-button">${this._t("Vybrat soubor s QR kódem", "Select a QR-code file")}<input id="scan-image" type="file" accept="image/*" ${this._scanningImage ? "disabled" : ""}></label></div>` : ""}
       </div>`;
   }
 
@@ -562,6 +609,8 @@ class EntityAuditPanel extends HTMLElement {
     this._scannerDialog.setAttribute("open", "");
     this._scannerDialog.querySelector("#close-scanner")?.addEventListener("click", () => this._closeScanner());
     this._scannerDialog.querySelector("#scan-again")?.addEventListener("click", () => this._startScanner());
+    this._scannerDialog.querySelector("#retry-camera")?.addEventListener("click", () => this._startScanner());
+    this._scannerDialog.querySelector("#camera-wait")?.addEventListener("change", (event) => this._setCameraWaitSeconds(event.target.value));
     this._scannerDialog.querySelector("#filter-scanned-device")?.addEventListener("click", () => this._filterToScannedDevice());
     this._scannerDialog.querySelector("#open-scanned-device")?.addEventListener("click", () => this._recordActivity("scanned_device_page_opened", "info", this._scanMatchedDevice?.device_id));
     this._scannerDialog.querySelector("#scan-camera-image")?.addEventListener("change", (event) => this._scanImageFile(event.target.files?.[0]));
@@ -582,11 +631,12 @@ class EntityAuditPanel extends HTMLElement {
     this._scanMatchedDevice = null;
     this._scannerStarting = true;
     this._scannerReaderFailed = false;
+    this._scannerTimedOut = false;
 
     // Request the camera before any rendering or async library loading. iOS may
     // require getUserMedia to run directly in the button's user gesture.
     let cameraRequest = null;
-    if (typeof navigator.mediaDevices?.getUserMedia === "function") {
+    if (this._hasLiveCameraApi()) {
       try {
         cameraRequest = navigator.mediaDevices.getUserMedia({
           audio: false,
@@ -597,14 +647,24 @@ class EntityAuditPanel extends HTMLElement {
       }
     }
     this._recordActivity("qr_scanner_opened");
+    const cameraEnvironment = [
+      `protocol=${window.location?.protocol || "unknown"}`,
+      `secure_context=${Boolean(window.isSecureContext)}`,
+      `media_devices=${Boolean(navigator.mediaDevices)}`,
+      `get_user_media=${typeof navigator.mediaDevices?.getUserMedia === "function"}`,
+      `visibility=${typeof document === "undefined" ? "unknown" : document.visibilityState}`,
+    ].join(", ");
+    this._recordActivity("qr_camera_environment", "info", cameraEnvironment);
     if (cameraRequest) this._recordActivity("qr_camera_requested");
     const readerRequest = this._loadQrReaderLibrary();
     this._renderScannerDialog();
+    if (cameraRequest) this._scheduleCameraWaitTimer();
 
     readerRequest.catch((error) => {
       if (!this._scannerOpen) return;
       this._scannerReaderFailed = true;
       this._scannerStarting = false;
+      this._clearCameraWaitTimer();
       this._stopScannerCamera();
       this._scannerError = this._t(
         "Čtečku QR kódů se nepodařilo načíst. Použijte aktualizovaný panel a zkuste to znovu.",
@@ -616,6 +676,7 @@ class EntityAuditPanel extends HTMLElement {
 
     if (!cameraRequest) {
       this._scannerStarting = false;
+      this._clearCameraWaitTimer();
       this._scannerError = this._cameraAccessMessage();
       this._recordActivity("qr_camera_failed", "error", "media_devices_unavailable");
       this._renderScannerDialog();
@@ -624,7 +685,7 @@ class EntityAuditPanel extends HTMLElement {
 
     try {
       const stream = await cameraRequest;
-      if (!this._scannerOpen) {
+      if (!this._scannerOpen || this._scannerTimedOut) {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
@@ -634,11 +695,13 @@ class EntityAuditPanel extends HTMLElement {
       }
       this._scannerStream = stream;
       this._scannerStarting = false;
+      this._clearCameraWaitTimer();
       this._recordActivity("qr_camera_started");
       this._renderScannerDialog();
     } catch (error) {
       if (!this._scannerOpen || this._scannerReaderFailed) return;
       this._scannerStarting = false;
+      this._clearCameraWaitTimer();
       this._scannerError = this._cameraAccessMessage(error);
       this._recordActivity("qr_camera_failed", "error", error?.name || "unknown_error");
       this._renderScannerDialog();
@@ -646,6 +709,7 @@ class EntityAuditPanel extends HTMLElement {
   }
 
   _stopScannerCamera() {
+    this._clearCameraWaitTimer();
     if (this._scannerFrame != null) cancelAnimationFrame(this._scannerFrame);
     this._scannerFrame = null;
     if (this._scannerStream) {
@@ -660,6 +724,7 @@ class EntityAuditPanel extends HTMLElement {
     this._scannerError = null;
     this._scannerStarting = false;
     this._scannerReaderFailed = false;
+    this._scannerTimedOut = false;
     this._scanResult = null;
     this._scanMatchedDevice = null;
     this._removeScannerDialog();
@@ -669,6 +734,8 @@ class EntityAuditPanel extends HTMLElement {
   async _scanImageFile(file) {
     if (!file) return;
     this._recordActivity("qr_photo_requested");
+    this._clearCameraWaitTimer();
+    this._scannerStarting = false;
     if ((file.type && !file.type.startsWith("image/")) || file.size > 20_000_000) {
       this._scannerError = this._t(
         "Vyberte obrázek QR kódu o velikosti nejvýše 20 MB.",
@@ -1175,6 +1242,8 @@ class EntityAuditPanel extends HTMLElement {
         .camera-hint { position:absolute; left:12px; right:12px; bottom:12px; padding:8px; border-radius:8px; text-align:center; background:#000a; font-size:13px; }
         .scanner-error { padding:11px 13px; border-radius:9px; color:var(--error-color); background:var(--secondary-background-color); font-weight:600; }
         .scanner-note { padding:10px 12px; border-left:3px solid var(--primary-color); color:var(--secondary-text-color); background:var(--secondary-background-color); font-size:14px; line-height:1.4; }
+        .camera-wait { display:flex; align-items:center; gap:7px; color:var(--secondary-text-color); font-size:14px; font-weight:600; }
+        .camera-wait input { width:64px; min-height:38px; border:1px solid var(--divider-color); border-radius:8px; padding:6px 8px; color:var(--primary-text-color); background:var(--card-background-color); }
         .scanner-actions { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
         .file-button, .primary-link { display:inline-flex; min-height:44px; align-items:center; justify-content:center; border-radius:9px; padding:9px 13px; cursor:pointer; font-weight:600; text-decoration:none; }
         .file-button { border:1px solid var(--divider-color); color:var(--primary-text-color); background:var(--card-background-color); }
@@ -1377,6 +1446,6 @@ class EntityAuditPanel extends HTMLElement {
   }
 }
 
-if (!customElements.get("entity-audit-panel-v0314")) {
-  customElements.define("entity-audit-panel-v0314", EntityAuditPanel);
+if (!customElements.get("entity-audit-panel-v0315")) {
+  customElements.define("entity-audit-panel-v0315", EntityAuditPanel);
 }

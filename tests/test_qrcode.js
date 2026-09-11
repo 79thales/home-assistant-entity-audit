@@ -177,6 +177,13 @@ async function testCameraRequestUsesTheOriginalTap() {
     if (!activityMessages.some((message) => message.event_type === "qr_camera_requested")) {
       throw new Error("Camera request was not written to the local action log");
     }
+    const environmentMessage = activityMessages.find((message) => message.event_type === "qr_camera_environment");
+    if (!environmentMessage?.detail?.includes("get_user_media=true")) {
+      throw new Error("Camera environment was not written to the local action log");
+    }
+    if (scanner._cameraWaitSecondsValue() !== 5) {
+      throw new Error("Camera wait time does not default to five seconds");
+    }
   } finally {
     if (originalNavigator) Object.defineProperty(global, "navigator", originalNavigator);
     else delete global.navigator;
@@ -184,6 +191,45 @@ async function testCameraRequestUsesTheOriginalTap() {
   }
 }
 
+function testCameraWaitTimeout() {
+  const originalNavigator = Object.getOwnPropertyDescriptor(global, "navigator");
+  const originalSecureContext = global.isSecureContext;
+  const originalSetTimeout = global.setTimeout;
+  const originalClearTimeout = global.clearTimeout;
+  let timeoutCallback;
+  let requestedDelay;
+  Object.defineProperty(global, "navigator", {
+    configurable: true,
+    value: {
+      mediaDevices: { getUserMedia: () => new Promise(() => {}) },
+    },
+  });
+  global.isSecureContext = true;
+  global.setTimeout = (callback, delay) => {
+    timeoutCallback = callback;
+    requestedDelay = delay;
+    return 1;
+  };
+  global.clearTimeout = () => {};
+  const scanner = new global.EntityAuditPanel();
+  scanner._renderScannerDialog = () => {};
+
+  try {
+    scanner._startScanner();
+    if (requestedDelay !== 5000) throw new Error("Camera wait is not five seconds by default");
+    timeoutCallback();
+    if (!scanner._scannerTimedOut) throw new Error("Camera timeout was not retained");
+    if (!scanner._scannerError?.includes("5")) throw new Error("Camera timeout did not explain the wait duration");
+  } finally {
+    if (originalNavigator) Object.defineProperty(global, "navigator", originalNavigator);
+    else delete global.navigator;
+    global.isSecureContext = originalSecureContext;
+    global.setTimeout = originalSetTimeout;
+    global.clearTimeout = originalClearTimeout;
+  }
+}
+
+testCameraWaitTimeout();
 testCameraRequestUsesTheOriginalTap().catch((error) => {
   console.error(error);
   process.exitCode = 1;

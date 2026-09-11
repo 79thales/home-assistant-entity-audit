@@ -28,9 +28,12 @@ ACTIVITY_EVENT_TYPES = frozenset(
         "labels_pdf_shared",
         "labels_pdf_share_failed",
         "qr_scanner_opened",
+        "qr_camera_environment",
         "qr_camera_requested",
         "qr_camera_started",
         "qr_camera_failed",
+        "qr_camera_timed_out",
+        "qr_camera_wait_updated",
         "qr_reader_failed",
         "qr_label_scanned",
         "qr_label_rejected",
@@ -45,5 +48,5 @@ PROBLEM_STATES = {"unavailable", "unknown"}
 PANEL_URL = "/entity_audit/entity-audit-panel.js"
 QR_LIBRARY_URL = "/entity_audit/qrcode.js"
 QR_READER_LIBRARY_URL = "/entity_audit/jsQR.js"
-PANEL_MODULE_URL = f"{PANEL_URL}?v=0.3.14"
-PANEL_ELEMENT = "entity-audit-panel-v0314"
+PANEL_MODULE_URL = f"{PANEL_URL}?v=0.3.15"
+PANEL_ELEMENT = "entity-audit-panel-v0315"
