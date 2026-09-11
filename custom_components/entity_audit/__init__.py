@@ -10,8 +10,17 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import (
+    CONF_ACTIVITY_LOG_ENABLED,
+    CONF_CAMERA_WAIT_SECONDS,
+    CONF_LABEL_HEIGHT,
+    CONF_LABEL_VARIANT,
+    CONF_LABEL_WIDTH,
     CONF_MAX_EVENTS,
     CONF_RETENTION_DAYS,
+    DEFAULT_CAMERA_WAIT_SECONDS,
+    DEFAULT_LABEL_HEIGHT,
+    DEFAULT_LABEL_VARIANT,
+    DEFAULT_LABEL_WIDTH,
     DEFAULT_MAX_EVENTS,
     DEFAULT_RETENTION_DAYS,
     DOMAIN,
@@ -37,6 +46,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass,
         values.get(CONF_RETENTION_DAYS, DEFAULT_RETENTION_DAYS),
         values.get(CONF_MAX_EVENTS, DEFAULT_MAX_EVENTS),
+        values.get(CONF_ACTIVITY_LOG_ENABLED),
+        values.get(CONF_CAMERA_WAIT_SECONDS, DEFAULT_CAMERA_WAIT_SECONDS),
+        values.get(CONF_LABEL_WIDTH, DEFAULT_LABEL_WIDTH),
+        values.get(CONF_LABEL_HEIGHT, DEFAULT_LABEL_HEIGHT),
+        values.get(CONF_LABEL_VARIANT, DEFAULT_LABEL_VARIANT),
     )
     await manager.async_start()
     runtime = hass.data.setdefault(DOMAIN, {})

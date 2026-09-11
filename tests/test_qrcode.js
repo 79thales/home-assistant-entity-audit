@@ -21,11 +21,11 @@ global.customElements = {
 require("../custom_components/entity_audit/frontend/entity-audit-panel.js");
 
 const labelData = {
-  name: "Střídač FVE",
+  name: "Solar inverter",
   ip_address: "192.168.1.20",
   mac_address: "00:11:22:33:44:55",
   manufacturer: "GoodWe",
-  area: "Technická místnost",
+  area: "Utility room",
 };
 const panel = new global.EntityAuditPanel();
 const payload = panel._labelQrPayload({

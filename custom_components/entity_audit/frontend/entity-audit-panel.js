@@ -39,13 +39,7 @@ class EntityAuditPanel extends HTMLElement {
     this._scanMatchedDevice = null;
     this._scanningImage = false;
     this._lastScanTime = 0;
-    this._activityLogOpen = false;
-    this._activityLoading = false;
     this._activityEnabled = true;
-    this._activity = [];
-    this._activityCount = 0;
-    this._activityRetentionDays = null;
-    this._activityError = null;
   }
 
   set hass(value) {
@@ -71,18 +65,22 @@ class EntityAuditPanel extends HTMLElement {
     this._revokeLabelPdf();
   }
 
-  _t(cs, en) {
-    return this._hass?.language === "cs" ? cs : en;
-  }
-
   async _load() {
     if (!this._hass || this._loading) return;
     this._loading = true;
     this._error = null;
     this._render();
     try {
-      this._entities = await this._hass.callWS({ type: "entity_audit/list_entities" });
-      this._loadActivity(false);
+      const [entities, settings] = await Promise.all([
+        this._hass.callWS({ type: "entity_audit/list_entities" }),
+        this._hass.callWS({ type: "entity_audit/get_settings" }),
+      ]);
+      this._entities = entities;
+      this._activityEnabled = settings.activity_log_enabled;
+      this._cameraWaitSeconds = settings.camera_wait_seconds;
+      this._labelWidth = settings.label_width_mm;
+      this._labelHeight = settings.label_height_mm;
+      this._labelVariant = settings.label_variant;
       if (this._selected) {
         this._selected = this._entities.find((e) => e.entity_id === this._selected.entity_id) || null;
       }
@@ -111,11 +109,8 @@ class EntityAuditPanel extends HTMLElement {
 
   async _bulkSet(rows, enabled) {
     if (!rows.length) return;
-    const action = enabled ? this._t("zapnout", "enable") : this._t("vypnout", "disable");
-    if (!confirm(this._t(
-      `Opravdu ${action} audit pro ${rows.length} zobrazených entit?`,
-      `Really ${action} auditing for ${rows.length} displayed entities?`
-    ))) return;
+    const action = enabled ? "enable" : "disable";
+    if (!confirm(`Really ${action} auditing for ${rows.length} displayed entities?`)) return;
     await this._hass.callWS({
       type: "entity_audit/set_logging_bulk",
       entity_ids: rows.map((entity) => entity.entity_id),
@@ -142,7 +137,7 @@ class EntityAuditPanel extends HTMLElement {
   }
 
   async _clear() {
-    if (!this._selected || !confirm(this._t("Opravdu smazat uloženou historii této entity?", "Delete stored history for this entity?"))) return;
+    if (!this._selected || !confirm("Delete stored history for this entity?")) return;
     await this._hass.callWS({
       type: "entity_audit/clear_history",
       entity_id: this._selected.entity_id,
@@ -203,103 +198,7 @@ class EntityAuditPanel extends HTMLElement {
     if (!this._hass || !this._activityEnabled) return;
     const payload = { type: "entity_audit/log_activity", event_type: eventType, level };
     if (detail) payload.detail = String(detail).slice(0, 240);
-    this._hass.callWS(payload).then(() => {
-      this._activityCount += 1;
-    }).catch(() => undefined);
-  }
-
-  async _loadActivity(render = true) {
-    if (!this._hass || this._activityLoading) return;
-    this._activityLoading = true;
-    this._activityError = null;
-    if (render) this._render();
-    try {
-      const result = await this._hass.callWS({
-        type: "entity_audit/get_activity",
-        limit: 500,
-      });
-      this._activityEnabled = result.enabled;
-      this._activity = result.events || [];
-      this._activityCount = result.count || 0;
-      this._activityRetentionDays = result.retention_days;
-    } catch (error) {
-      this._activityError = error.message || String(error);
-    } finally {
-      this._activityLoading = false;
-      if (render || this._activityLogOpen) this._render();
-    }
-  }
-
-  async _openActivityLog() {
-    this._activityLogOpen = true;
-    await this._loadActivity();
-  }
-
-  async _setActivityEnabled(enabled) {
-    const previous = this._activityEnabled;
-    this._activityEnabled = enabled;
-    this._render();
-    try {
-      const result = await this._hass.callWS({
-        type: "entity_audit/set_activity_enabled",
-        enabled,
-      });
-      this._activityEnabled = result.enabled;
-      this._activity = result.events || this._activity;
-      this._activityCount = result.count ?? this._activityCount;
-      this._activityRetentionDays = result.retention_days ?? this._activityRetentionDays;
-    } catch (error) {
-      this._activityEnabled = previous;
-      this._activityError = error.message || String(error);
-    }
-    this._render();
-  }
-
-  async _clearActivity() {
-    if (!confirm(this._t(
-      "Opravdu smazat historii akcí a chyb?",
-      "Delete the action and error history?"
-    ))) return;
-    const result = await this._hass.callWS({ type: "entity_audit/clear_activity" });
-    this._activity = result.events || [];
-    this._activityCount = result.count || 0;
-    this._render();
-  }
-
-  _activityText(event) {
-    const labels = {
-      activity_log_enabled: this._t("Záznam akcí a chyb byl zapnut", "Action and error logging was enabled"),
-      activity_log_disabled: this._t("Záznam akcí a chyb byl vypnut", "Action and error logging was disabled"),
-      entity_audit_enabled: this._t("Audit entity zapnut", "Entity auditing enabled"),
-      entity_audit_disabled: this._t("Audit entity vypnut", "Entity auditing disabled"),
-      entity_audit_bulk_enabled: this._t("Audit zobrazených entit zapnut", "Displayed entity auditing enabled"),
-      entity_audit_bulk_disabled: this._t("Audit zobrazených entit vypnut", "Displayed entity auditing disabled"),
-      entity_history_opened: this._t("Otevřena historie entity", "Entity history opened"),
-      entity_history_cleared: this._t("Historie entity smazána", "Entity history cleared"),
-      entity_detail_opened: this._t("Otevřen detail entity", "Entity detail opened"),
-      csv_exported: this._t("Exportován seznam entit do CSV", "Entity list exported to CSV"),
-      labels_pdf_created: this._t("Vytvořeno PDF štítků", "Label PDF created"),
-      labels_pdf_shared: this._t("Sdíleno PDF štítků", "Label PDF shared"),
-      labels_pdf_failed: this._t("Vytvoření PDF štítků selhalo", "Label PDF creation failed"),
-      labels_pdf_share_failed: this._t("Sdílení PDF štítků selhalo", "Label PDF sharing failed"),
-      qr_scanner_opened: this._t("Otevřena čtečka QR štítků", "QR label scanner opened"),
-      qr_camera_environment: this._t("Diagnostika prostředí kamery", "Camera environment diagnostic"),
-      qr_camera_requested: this._t("Vyžádán přístup ke kameře", "Camera access requested"),
-      qr_camera_started: this._t("Kamera QR čtečky spuštěna", "QR scanner camera started"),
-      qr_camera_failed: this._t("Kamera QR čtečky selhala", "QR scanner camera failed"),
-      qr_camera_timed_out: this._t("Čekání na kameru vypršelo", "Camera wait timed out"),
-      qr_camera_wait_updated: this._t("Změněna doba čekání na kameru", "Camera wait duration changed"),
-      qr_reader_failed: this._t("Načtení QR čtečky selhalo", "QR reader loading failed"),
-      qr_label_scanned: this._t("Načten QR štítek", "QR label scanned"),
-      qr_label_rejected: this._t("Odmítnut neplatný QR kód", "Invalid QR code rejected"),
-      qr_photo_requested: this._t("Vybrána fotografie QR kódu", "QR-code photo selected"),
-      qr_photo_failed: this._t("Načtení fotografie QR kódu selhalo", "QR-code photo scanning failed"),
-      scanned_device_filtered: this._t("Zobrazeny entity načteného zařízení", "Scanned device entities displayed"),
-      scanned_device_page_opened: this._t("Otevřena stránka načteného zařízení", "Scanned device page opened"),
-      inventory_refreshed: this._t("Obnoven inventář entit", "Entity inventory refreshed"),
-    };
-    const text = labels[event.type] || event.type;
-    return event.detail ? `${text} · ${event.detail}` : text;
+    this._hass.callWS(payload).catch(() => undefined);
   }
 
   _labelDevices(rows) {
@@ -442,10 +341,7 @@ class EntityAuditPanel extends HTMLElement {
       this._renderScannerDialog();
       return true;
     } catch (_error) {
-      this._scannerError = this._t(
-        "Tento QR kód není štítek vytvořený aplikací Entity Audit.",
-        "This QR code is not a label created by Entity Audit."
-      );
+      this._scannerError = "This QR code is not a label created by Entity Audit.";
       this._recordActivity("qr_label_rejected", "error");
       this._renderScannerDialog();
       return false;
@@ -492,10 +388,7 @@ class EntityAuditPanel extends HTMLElement {
       this._scannerFrame = requestAnimationFrame((timestamp) => this._scanCameraFrame(timestamp));
     }).catch((error) => {
       this._stopScannerCamera();
-      this._scannerError = this._t(
-        "Náhled kamery se nepodařilo spustit. Použijte fotografii.",
-        "The camera preview could not start. Use a photo instead."
-      );
+      this._scannerError = "The camera preview could not start. Use a photo instead.";
       this._recordActivity("qr_camera_failed", "error", error?.name || "preview_failed");
       this._renderScannerDialog();
     });
@@ -503,33 +396,18 @@ class EntityAuditPanel extends HTMLElement {
 
   _cameraAccessMessage(error) {
     if (!window.isSecureContext) {
-      return this._t(
-        "Živá kamera vyžaduje zabezpečené připojení HTTPS. Použijte HTTPS nebo načtěte fotografii QR kódu.",
-        "Live camera access requires a secure HTTPS connection. Use HTTPS or scan a QR-code photo."
-      );
+      return "Live camera access requires a secure HTTPS connection. Use HTTPS or scan a QR-code photo.";
     }
     if (error?.name === "NotAllowedError") {
-      return this._t(
-        "Přístup ke kameře byl zamítnut. V nastavení iOS povolte aplikaci Home Assistant přístup ke kameře.",
-        "Camera access was denied. Allow camera access for the Home Assistant app in iOS Settings."
-      );
+      return "Camera access was denied. Allow camera access for the Home Assistant app in iOS Settings.";
     }
     if (error?.name === "NotReadableError") {
-      return this._t(
-        "Kameru nyní používá jiná aplikace. Zavřete ji a zkuste to znovu.",
-        "Another app is using the camera. Close it and try again."
-      );
+      return "Another app is using the camera. Close it and try again.";
     }
     if (error?.name === "NotFoundError") {
-      return this._t(
-        "Na tomto zařízení není dostupná kamera.",
-        "No camera is available on this device."
-      );
+      return "No camera is available on this device.";
     }
-    return this._t(
-      "Kameru nelze otevřít. Povolte přístup ke kameře, nebo použijte fotografii.",
-      "The camera cannot be opened. Allow camera access or use a photo."
-    );
+    return "The camera cannot be opened. Allow camera access or use a photo.";
   }
 
   _hasLiveCameraApi() {
@@ -556,45 +434,35 @@ class EntityAuditPanel extends HTMLElement {
       if (!this._scannerOpen || !this._scannerStarting) return;
       this._scannerStarting = false;
       this._scannerTimedOut = true;
-      this._scannerError = this._t(
-        `Kamera se během ${waitSeconds} s neotevřela. Zkuste ji znovu nebo načtěte QR kód z fotografie.`,
-        `The camera did not open within ${waitSeconds} seconds. Try again or scan a QR-code photo.`
-      );
+      this._scannerError = `The camera did not open within ${waitSeconds} seconds. Try again or scan a QR-code photo.`;
       this._recordActivity("qr_camera_timed_out", "error", `wait_seconds=${waitSeconds}`);
       this._renderScannerDialog();
     }, waitSeconds * 1000);
   }
 
-  _setCameraWaitSeconds(value) {
-    this._cameraWaitSeconds = Math.min(30, Math.max(1, Number(value) || 5));
-    this._recordActivity("qr_camera_wait_updated", "info", `wait_seconds=${this._cameraWaitSecondsValue()}`);
-    if (this._scannerStarting) this._scheduleCameraWaitTimer();
-    this._renderScannerDialog();
-  }
-
   _scannerDialogContent() {
     const liveCameraAvailable = this._hasLiveCameraApi();
     const waitSeconds = this._cameraWaitSecondsValue();
-    return `<div class="dialog-head"><div><h2>${this._t("Čtečka QR štítků", "QR label scanner")}</h2><div class="entity-id">${this._t("Naskenujte štítek vytvořený aplikací Entity Audit", "Scan a label created by Entity Audit")}</div></div><button id="close-scanner" aria-label="${this._t("Zavřít čtečku", "Close scanner")}">✕</button></div>
+    return `<div class="dialog-head"><div><h2>${"QR label scanner"}</h2><div class="entity-id">${"Scan a label created by Entity Audit"}</div></div><button id="close-scanner" aria-label="${"Close scanner"}">✕</button></div>
       <div class="scanner-body">
         ${this._scanResult ? `<section class="virtual-label">
           <h3>${this._escape(this._scanResult.name)}</h3>
           <dl class="label-detail">
-            <dt>${this._t("IP adresa", "IP address")}</dt><dd>${this._escape(this._scanResult.ip_address || "—")}</dd>
-            <dt>${this._t("MAC adresa", "MAC address")}</dt><dd>${this._escape(this._scanResult.mac_address || "—")}</dd>
-            <dt>${this._t("Výrobce", "Manufacturer")}</dt><dd>${this._escape(this._scanResult.manufacturer || "—")}</dd>
-            <dt>${this._t("Umístění", "Area")}</dt><dd>${this._escape(this._scanResult.area || "—")}</dd>
+            <dt>${"IP address"}</dt><dd>${this._escape(this._scanResult.ip_address || "—")}</dd>
+            <dt>${"MAC address"}</dt><dd>${this._escape(this._scanResult.mac_address || "—")}</dd>
+            <dt>${"Manufacturer"}</dt><dd>${this._escape(this._scanResult.manufacturer || "—")}</dd>
+            <dt>${"Area"}</dt><dd>${this._escape(this._scanResult.area || "—")}</dd>
           </dl>
         </section>
         <div class="${this._scanMatchedDevice ? "match-ok" : "match-missing"}">${this._scanMatchedDevice
-          ? this._t("Zařízení bylo nalezeno v aktuálním inventáři.", "The device was found in the current inventory.")
-          : this._t("Zařízení se v aktuálním inventáři nepodařilo jednoznačně najít.", "The device could not be uniquely matched in the current inventory.")}</div>
+          ? "The device was found in the current inventory."
+          : "The device could not be uniquely matched in the current inventory."}</div>
         <div class="scanner-actions">
-          ${this._scanMatchedDevice ? `<button id="filter-scanned-device">${this._t("Zobrazit jeho entity", "Show its entities")}</button><a id="open-scanned-device" class="primary-link" href="/config/devices/device/${this._escape(this._scanMatchedDevice.device_id)}">${this._t("Otevřít stránku zařízení", "Open device page")}</a>` : ""}
-          <button id="scan-again">${this._t("Skenovat znovu", "Scan again")}</button>
-        </div>` : `${liveCameraAvailable && !this._scannerTimedOut ? `<div class="camera-stage"><video id="scanner-video" muted playsinline></video><div class="camera-guide"></div><div class="camera-hint">${this._scannerStarting ? this._t(`Čekám na povolení kamery (max. ${waitSeconds} s)…`, `Waiting for camera permission (up to ${waitSeconds} s)…`) : this._t("Umístěte QR kód doprostřed rámečku", "Place the QR code inside the frame")}</div></div>` : `<div class="scanner-note">${this._scannerTimedOut ? this._t("Živá kamera se v nastaveném čase neotevřela. Můžete ji zkusit znovu nebo načíst QR kód z fotografie.", "The live camera did not open in the configured time. You can retry it or scan a QR-code photo.") : this._t("Živá kamera není v tomto připojení dostupná. Načtěte QR kód z fotografie nebo souboru.", "Live camera access is unavailable in this connection. Scan a QR-code photo or file instead.")}</div>`}`}
+          ${this._scanMatchedDevice ? `<button id="filter-scanned-device">${"Show its entities"}</button><a id="open-scanned-device" class="primary-link" href="/config/devices/device/${this._escape(this._scanMatchedDevice.device_id)}">${"Open device page"}</a>` : ""}
+          <button id="scan-again">${"Scan again"}</button>
+        </div>` : `${liveCameraAvailable && !this._scannerTimedOut ? `<div class="camera-stage"><video id="scanner-video" muted playsinline></video><div class="camera-guide"></div><div class="camera-hint">${this._scannerStarting ? `Waiting for camera permission (up to ${waitSeconds} s)…` : "Place the QR code inside the frame"}</div></div>` : `<div class="scanner-note">${this._scannerTimedOut ? "The live camera did not open in the configured time. You can retry it or scan a QR-code photo." : "Live camera access is unavailable in this connection. Scan a QR-code photo or file instead."}</div>`}`}
           ${this._scannerError ? `<div class="scanner-error">${this._escape(this._scannerError)}</div>` : ""}
-          ${!this._scanResult ? `<label class="camera-wait">${this._t("Čekat na kameru", "Wait for camera")} <input id="camera-wait" type="number" min="1" max="30" step="1" value="${waitSeconds}" aria-label="${this._t("Doba čekání na kameru v sekundách", "Camera wait time in seconds")}"> ${this._t("s", "s")}</label><div class="scanner-actions">${this._scannerTimedOut ? `<button id="retry-camera">${this._t("Zkusit kameru znovu", "Try camera again")}</button>` : ""}<label class="file-button">${this._scanningImage ? this._t("Zpracovávám obrázek…", "Processing image…") : this._t("Vyfotit QR kód", "Take a QR-code photo")}<input id="scan-camera-image" type="file" accept="image/*" capture="environment" ${this._scanningImage ? "disabled" : ""}></label><label class="file-button">${this._t("Vybrat soubor s QR kódem", "Select a QR-code file")}<input id="scan-image" type="file" accept="image/*" ${this._scanningImage ? "disabled" : ""}></label></div>` : ""}
+          ${!this._scanResult ? `<div class="scanner-actions">${this._scannerTimedOut ? `<button id="retry-camera">${"Try camera again"}</button>` : ""}<label class="file-button">${this._scanningImage ? "Processing image…" : "Take a QR-code photo"}<input id="scan-camera-image" type="file" accept="image/*" capture="environment" ${this._scanningImage ? "disabled" : ""}></label><label class="file-button">${"Select a QR-code file"}<input id="scan-image" type="file" accept="image/*" ${this._scanningImage ? "disabled" : ""}></label></div>` : ""}
       </div>`;
   }
 
@@ -617,7 +485,6 @@ class EntityAuditPanel extends HTMLElement {
     this._scannerDialog.querySelector("#close-scanner")?.addEventListener("click", () => this._closeScanner());
     this._scannerDialog.querySelector("#scan-again")?.addEventListener("click", () => this._startScanner());
     this._scannerDialog.querySelector("#retry-camera")?.addEventListener("click", () => this._startScanner());
-    this._scannerDialog.querySelector("#camera-wait")?.addEventListener("change", (event) => this._setCameraWaitSeconds(event.target.value));
     this._scannerDialog.querySelector("#filter-scanned-device")?.addEventListener("click", () => this._filterToScannedDevice());
     this._scannerDialog.querySelector("#open-scanned-device")?.addEventListener("click", () => this._recordActivity("scanned_device_page_opened", "info", this._scanMatchedDevice?.device_id));
     this._scannerDialog.querySelector("#scan-camera-image")?.addEventListener("change", (event) => this._scanImageFile(event.target.files?.[0]));
@@ -674,10 +541,7 @@ class EntityAuditPanel extends HTMLElement {
       this._scannerStarting = false;
       this._clearCameraWaitTimer();
       this._stopScannerCamera();
-      this._scannerError = this._t(
-        "Čtečku QR kódů se nepodařilo načíst. Použijte aktualizovaný panel a zkuste to znovu.",
-        "The QR reader could not be loaded. Reload the updated panel and try again."
-      );
+      this._scannerError = "The QR reader could not be loaded. Reload the updated panel and try again.";
       this._recordActivity("qr_reader_failed", "error", error?.name || "load_failed");
       this._renderScannerDialog();
     });
@@ -745,10 +609,7 @@ class EntityAuditPanel extends HTMLElement {
     this._clearCameraWaitTimer();
     this._scannerStarting = false;
     if ((file.type && !file.type.startsWith("image/")) || file.size > 20_000_000) {
-      this._scannerError = this._t(
-        "Vyberte obrázek QR kódu o velikosti nejvýše 20 MB.",
-        "Select a QR-code image no larger than 20 MB."
-      );
+      this._scannerError = "Select a QR-code image no larger than 20 MB.";
       this._renderScannerDialog();
       return;
     }
@@ -778,19 +639,13 @@ class EntityAuditPanel extends HTMLElement {
       canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
       const code = this._decodeScannerCanvas(canvas, "attemptBoth");
       if (!code?.data) {
-        this._scannerError = this._t(
-          "Na obrázku nebyl nalezen čitelný QR kód.",
-          "No readable QR code was found in the image."
-        );
+        this._scannerError = "No readable QR code was found in the image.";
         this._recordActivity("qr_photo_failed", "error", "no_code_found");
       } else {
         this._acceptScannedQr(code.data);
       }
     } catch (error) {
-      this._scannerError = this._t(
-        "Obrázek se nepodařilo načíst nebo zpracovat.",
-        "The image could not be loaded or processed."
-      );
+      this._scannerError = "The image could not be loaded or processed.";
       this._recordActivity("qr_photo_failed", "error", error?.name || "processing_failed");
     } finally {
       this._scanningImage = false;
@@ -893,9 +748,9 @@ class EntityAuditPanel extends HTMLElement {
     const titleSize = Math.max(14, Math.min(28, Math.round(height * 0.105)));
     const textSize = Math.max(10, Math.min(18, Math.round(height * 0.058)));
     const lineHeight = Math.round(textSize * 1.38);
-    const unavailable = this._t("neuvedeno", "not available");
-    const manufacturerLabel = this._t("Výrobce", "Manufacturer");
-    const areaLabel = this._t("Umístění", "Area");
+    const unavailable = "not available";
+    const manufacturerLabel = "Manufacturer";
+    const areaLabel = "Area";
 
     context.save();
     context.fillStyle = "#ffffff";
@@ -1043,10 +898,7 @@ class EntityAuditPanel extends HTMLElement {
   async _downloadLabelsPdf(rows) {
     const devices = this._labelDevices(rows);
     if (!devices.length) {
-      alert(this._t(
-        "Mezi zobrazenými zařízeními není žádné s dostupnou IP adresou.",
-        "None of the displayed devices has an available IP address."
-      ));
+      alert("None of the displayed devices has an available IP address.");
       return;
     }
 
@@ -1065,10 +917,7 @@ class EntityAuditPanel extends HTMLElement {
       };
       this._recordActivity("labels_pdf_created", "info", String(devices.length));
     } catch (error) {
-      alert(this._t(
-        "PDF s QR kódy se nepodařilo vytvořit.",
-        "The PDF with QR codes could not be created."
-      ));
+      alert("The PDF with QR codes could not be created.");
       this._recordActivity("labels_pdf_failed", "error", error?.name || "build_failed");
     } finally {
       this._buildingLabels = false;
@@ -1083,13 +932,13 @@ class EntityAuditPanel extends HTMLElement {
     try {
       await navigator.share({
         files: [file],
-        title: this._t("Štítky zařízení", "Device labels"),
+        title: "Device labels",
       });
       this._recordActivity("labels_pdf_shared");
     } catch (error) {
       if (error?.name !== "AbortError") {
         this._recordActivity("labels_pdf_share_failed", "error", error?.name || "share_failed");
-        alert(this._t("PDF se nepodařilo otevřít pro sdílení.", "The PDF could not be opened for sharing."));
+        alert("The PDF could not be opened for sharing.");
       }
     }
   }
@@ -1113,12 +962,12 @@ class EntityAuditPanel extends HTMLElement {
   _groupRows(rows) {
     if (this._groupBy === "none") return [{ key: "all", label: "", rows }];
     const definitions = {
-      device: ["device_id", "device_name", this._t("Bez zařízení", "No device")],
-      manufacturer: ["manufacturer", "manufacturer", this._t("Neznámý výrobce", "Unknown manufacturer")],
-      model: ["model", "model", this._t("Neznámý model", "Unknown model")],
-      platform: ["platform", "platform", this._t("Neznámá integrace", "Unknown integration")],
-      area: ["area_id", "area_name", this._t("Bez oblasti", "No area")],
-      domain: ["domain", "domain", this._t("Neznámý typ", "Unknown type")],
+      device: ["device_id", "device_name", "No device"],
+      manufacturer: ["manufacturer", "manufacturer", "Unknown manufacturer"],
+      model: ["model", "model", "Unknown model"],
+      platform: ["platform", "platform", "Unknown integration"],
+      area: ["area_id", "area_name", "No area"],
+      domain: ["domain", "domain", "Unknown type"],
     };
     const [keyField, labelField, fallback] = definitions[this._groupBy];
     const groups = new Map();
@@ -1189,7 +1038,7 @@ class EntityAuditPanel extends HTMLElement {
         .filter-toggle { white-space:nowrap; }
         .ribbon-controls .filter { min-height:42px; padding:0 11px; border:1px solid var(--divider-color); border-radius:9px; }
         .select-wrap { position:relative; min-width:200px; }
-        .select-wrap select, .filters select, .label-variant select { width:100%; min-height:44px; appearance:none; -webkit-appearance:none; border:1px solid var(--divider-color); border-radius:9px; padding:10px 38px 10px 13px; color:var(--primary-text-color); background-color:var(--card-background-color); background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='10' viewBox='0 0 16 10'%3E%3Cpath fill='%238fa4bf' d='m1 1 7 7 7-7' stroke='%238fa4bf' stroke-width='2'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 13px center; }
+        .select-wrap select, .filters select { width:100%; min-height:44px; appearance:none; -webkit-appearance:none; border:1px solid var(--divider-color); border-radius:9px; padding:10px 38px 10px 13px; color:var(--primary-text-color); background-color:var(--card-background-color); background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='10' viewBox='0 0 16 10'%3E%3Cpath fill='%238fa4bf' d='m1 1 7 7 7-7' stroke='%238fa4bf' stroke-width='2'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 13px center; }
         main { max-width:1400px; margin:auto; padding:20px; }
         .stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
         .stat, .card, .filter-panel, .pdf-ready { background:var(--card-background-color); border-radius:12px; box-shadow:var(--ha-card-box-shadow); padding:16px; }
@@ -1201,10 +1050,6 @@ class EntityAuditPanel extends HTMLElement {
         .device-filter { min-width:260px; max-width:460px; }
         label.filter { display:flex; gap:8px; align-items:center; white-space:nowrap; font-size:15px; font-weight:600; }
         input[type="checkbox"] { width:20px; height:20px; accent-color:var(--primary-color); }
-        label.label-size { display:flex; align-items:center; gap:5px; white-space:nowrap; }
-        .label-size input { width:68px; min-height:44px; border:1px solid var(--divider-color); border-radius:7px; padding:8px; color:var(--primary-text-color); background:var(--primary-background-color); }
-        label.label-variant { display:flex; align-items:center; gap:8px; white-space:nowrap; }
-        .label-variant select { min-width:190px; }
         .pdf-ready { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; border:1px solid var(--primary-color); font-size:15px; font-weight:600; }
         .pdf-ready a { display:inline-flex; align-items:center; min-height:42px; padding:8px 12px; border-radius:9px; color:var(--text-primary-color, white); background:var(--primary-color); text-decoration:none; }
         .pdf-ready button { color:var(--primary-color); border-color:var(--primary-color); background:transparent; }
@@ -1232,16 +1077,6 @@ class EntityAuditPanel extends HTMLElement {
         .history { display:grid; grid-template-columns:170px 100px 1fr; gap:10px; padding:10px 0; border-bottom:1px solid var(--divider-color); font-size:13px; }
         .event-problem { color:var(--error-color); font-weight:600; }
         .event-recovered { color:var(--success-color); font-weight:600; }
-        .activity-dialog { width:min(760px, calc(100vw - 20px)); }
-        .activity-controls { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 18px; border-bottom:1px solid var(--divider-color); }
-        .activity-controls .filter { margin:0; }
-        .activity-summary { color:var(--secondary-text-color); font-size:13px; }
-        .activity-entry { display:grid; grid-template-columns:150px auto minmax(0, 1fr); gap:10px; align-items:start; padding:11px 0; border-bottom:1px solid var(--divider-color); }
-        .activity-entry:last-child { border-bottom:0; }
-        .activity-entry.error { color:var(--error-color); }
-        .activity-level { display:inline-flex; width:max-content; padding:2px 7px; border-radius:999px; color:var(--secondary-text-color); background:var(--secondary-background-color); font-size:12px; font-weight:600; }
-        .activity-entry.error .activity-level { color:var(--error-color); }
-        .activity-detail { overflow-wrap:anywhere; }
         .scanner-dialog { width:min(560px, calc(100vw - 20px)); }
         .scanner-body { padding:18px; display:grid; gap:14px; }
         .camera-stage { position:relative; min-height:260px; overflow:hidden; border-radius:12px; color:white; background:#111; }
@@ -1250,8 +1085,6 @@ class EntityAuditPanel extends HTMLElement {
         .camera-hint { position:absolute; left:12px; right:12px; bottom:12px; padding:8px; border-radius:8px; text-align:center; background:#000a; font-size:13px; }
         .scanner-error { padding:11px 13px; border-radius:9px; color:var(--error-color); background:var(--secondary-background-color); font-weight:600; }
         .scanner-note { padding:10px 12px; border-left:3px solid var(--primary-color); color:var(--secondary-text-color); background:var(--secondary-background-color); font-size:14px; line-height:1.4; }
-        .camera-wait { display:flex; align-items:center; gap:7px; color:var(--secondary-text-color); font-size:14px; font-weight:600; }
-        .camera-wait input { width:64px; min-height:38px; border:1px solid var(--divider-color); border-radius:8px; padding:6px 8px; color:var(--primary-text-color); background:var(--card-background-color); }
         .scanner-actions { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
         .file-button, .primary-link { display:inline-flex; min-height:44px; align-items:center; justify-content:center; border-radius:9px; padding:9px 13px; cursor:pointer; font-weight:600; text-decoration:none; }
         .file-button { border:1px solid var(--divider-color); color:var(--primary-text-color); background:var(--card-background-color); }
@@ -1275,9 +1108,7 @@ class EntityAuditPanel extends HTMLElement {
           .filter-panel { padding:12px; }
           .filter-panel:not(.open) { display:none; }
           .toolbar { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:stretch; }
-          .toolbar button, .toolbar .label-size { width:100%; }
-          .toolbar .label-size, .toolbar .label-variant { grid-column:span 2; justify-content:space-between; }
-          .label-variant select { min-width:0; width:min(230px, 62vw); }
+          .toolbar button { width:100%; }
           .filters { grid-template-columns:1fr; }
           .device-filter { min-width:0; max-width:none; }
           th:nth-child(3), td:nth-child(3), th:nth-child(4), td:nth-child(4) { display:none; }
@@ -1288,129 +1119,107 @@ class EntityAuditPanel extends HTMLElement {
           .label-detail { grid-template-columns:1fr; gap:3px; }
           .label-detail dd { margin-bottom:7px; }
           .scanner-actions > * { flex:1 1 auto; }
-          .activity-controls { align-items:flex-start; flex-direction:column; }
-          .activity-entry { grid-template-columns:1fr auto; gap:5px 10px; }
-          .activity-detail { grid-column:1 / -1; }
         }
       </style>
       <ha-top-app-bar-fixed ${this._narrow ? "narrow" : ""}>
-        <span slot="title" class="system-title">${this._t("Audit entit", "Entity Audit")}</span>
-        <button slot="actionItems" id="open-activity" class="system-action" title="${this._t("Historie akcí a chyb", "Action and error history")}" aria-label="${this._t("Historie akcí a chyb", "Action and error history")}"><ha-icon icon="mdi:history"></ha-icon></button>
-        <button slot="actionItems" id="open-scanner" class="system-action" title="${this._t("Načíst QR štítek", "Scan QR label")}" aria-label="${this._t("Načíst QR štítek", "Scan QR label")}"><ha-icon icon="mdi:qrcode-scan"></ha-icon></button>
-        <button slot="actionItems" id="refresh" class="system-action" title="${this._t("Obnovit seznam entit", "Refresh entity list")}" aria-label="${this._t("Obnovit seznam entit", "Refresh entity list")}">${this._loading ? "…" : "↻"}</button>
+        <span slot="title" class="system-title">${"Entity Audit"}</span>
+        <button slot="actionItems" id="open-scanner" class="system-action" title="${"Scan QR label"}" aria-label="${"Scan QR label"}"><ha-icon icon="mdi:qrcode-scan"></ha-icon></button>
+        <button slot="actionItems" id="refresh" class="system-action" title="${"Refresh entity list"}" aria-label="${"Refresh entity list"}">${this._loading ? "…" : "↻"}</button>
         <div slot="subRow" class="system-sub-row">
-          <label class="search-wrap"><span class="search-icon" aria-hidden="true">⌕</span><input id="search" class="search" type="search" placeholder="${this._t("Hledat název, zařízení, entity_id nebo integraci…", "Search name, device, entity_id or integration…")}" value="${this._escape(this._filter)}" aria-label="${this._t("Hledat entity", "Search entities")}"></label>
-          <button id="toggle-filters" class="filter-toggle" aria-expanded="${this._filtersOpen}">☰ ${this._t("Filtry", "Filters")}</button>
+          <label class="search-wrap"><span class="search-icon" aria-hidden="true">⌕</span><input id="search" class="search" type="search" placeholder="${"Search name, device, entity_id or integration…"}" value="${this._escape(this._filter)}" aria-label="${"Search entities"}"></label>
+          <button id="toggle-filters" class="filter-toggle" aria-expanded="${this._filtersOpen}">☰ ${"Filters"}</button>
           <div class="ribbon-controls">
-            <label class="select-wrap"><select id="group-by" aria-label="${this._t("Seskupit podle", "Group by")}">
-              <option value="none" ${this._groupBy === "none" ? "selected" : ""}>${this._t("Bez seskupení", "No grouping")}</option>
-              <option value="device" ${this._groupBy === "device" ? "selected" : ""}>${this._t("Podle zařízení", "By device")}</option>
-              <option value="manufacturer" ${this._groupBy === "manufacturer" ? "selected" : ""}>${this._t("Podle výrobce", "By manufacturer")}</option>
-              <option value="model" ${this._groupBy === "model" ? "selected" : ""}>${this._t("Podle modelu", "By model")}</option>
-              <option value="platform" ${this._groupBy === "platform" ? "selected" : ""}>${this._t("Podle integrace", "By integration")}</option>
-              <option value="area" ${this._groupBy === "area" ? "selected" : ""}>${this._t("Podle oblasti", "By area")}</option>
-              <option value="domain" ${this._groupBy === "domain" ? "selected" : ""}>${this._t("Podle typu entity", "By entity type")}</option>
+            <label class="select-wrap"><select id="group-by" aria-label="${"Group by"}">
+              <option value="none" ${this._groupBy === "none" ? "selected" : ""}>${"No grouping"}</option>
+              <option value="device" ${this._groupBy === "device" ? "selected" : ""}>${"By device"}</option>
+              <option value="manufacturer" ${this._groupBy === "manufacturer" ? "selected" : ""}>${"By manufacturer"}</option>
+              <option value="model" ${this._groupBy === "model" ? "selected" : ""}>${"By model"}</option>
+              <option value="platform" ${this._groupBy === "platform" ? "selected" : ""}>${"By integration"}</option>
+              <option value="area" ${this._groupBy === "area" ? "selected" : ""}>${"By area"}</option>
+              <option value="domain" ${this._groupBy === "domain" ? "selected" : ""}>${"By entity type"}</option>
             </select></label>
-            <label class="filter"><input id="problems" type="checkbox" ${this._problemOnly ? "checked" : ""}> ${this._t("Jen problémy", "Problems only")}</label>
+            <label class="filter"><input id="problems" type="checkbox" ${this._problemOnly ? "checked" : ""}> ${"Problems only"}</label>
           </div>
         </div>
       <main>
         ${this._error ? `<div class="card problem">${this._escape(this._error)}</div>` : ""}
         <section class="stats">
-          <div class="stat"><b>${this._entities.length}</b>${this._t("známých entit", "known entities")}</div>
-          <div class="stat"><b>${this._entities.filter((e) => e.logging).length}</b>${this._t("auditovaných", "audited")}</div>
-          <div class="stat"><b>${problemCount}</b>${this._t("aktuálních problémů", "current problems")}</div>
+          <div class="stat"><b>${this._entities.length}</b>${"known entities"}</div>
+          <div class="stat"><b>${this._entities.filter((e) => e.logging).length}</b>${"audited"}</div>
+          <div class="stat"><b>${problemCount}</b>${"current problems"}</div>
         </section>
-        ${this._labelPdf ? `<section class="pdf-ready"><span>${this._t("PDF štítků je připraven.", "The label PDF is ready.")}</span><a id="download-label-pdf" href="${this._escape(this._labelPdf.url)}" download="${this._escape(this._labelPdf.filename)}">${this._t("Otevřít nebo uložit PDF", "Open or save PDF")}</a>${navigator.canShare && navigator.share ? `<button id="share-label-pdf">${this._t("Sdílet PDF", "Share PDF")}</button>` : ""}<button id="discard-label-pdf">✕</button></section>` : ""}
+        ${this._labelPdf ? `<section class="pdf-ready"><span>${"The label PDF is ready."}</span><a id="download-label-pdf" href="${this._escape(this._labelPdf.url)}" download="${this._escape(this._labelPdf.filename)}">${"Open or save PDF"}</a>${navigator.canShare && navigator.share ? `<button id="share-label-pdf">${"Share PDF"}</button>` : ""}<button id="discard-label-pdf">✕</button></section>` : ""}
         <section class="filter-panel ${this._filtersOpen ? "open" : ""}">
           <div class="toolbar">
-            <button id="bulk-enable">${this._t("Auditovat zobrazené", "Audit displayed")}</button>
-            <button id="bulk-disable">${this._t("Vypnout audit", "Disable audit")}</button>
-            <button id="export">${this._t("Export CSV", "Export CSV")}</button>
-            <label class="label-size">${this._t("Štítek (mm)", "Label (mm)")} <input id="label-width" type="number" min="20" max="190" step="1" value="${this._labelWidth}" aria-label="${this._t("Šířka štítku v milimetrech", "Label width in millimeters")}"> × <input id="label-height" type="number" min="20" max="280" step="1" value="${this._labelHeight}" aria-label="${this._t("Výška štítku v milimetrech", "Label height in millimeters")}"></label>
-            <label class="label-variant">${this._t("Varianta", "Variant")} <select id="label-variant" aria-label="${this._t("Varianta štítku", "Label variant")}">
-              <option value="text" ${this._labelVariant === "text" ? "selected" : ""}>${this._t("Textový štítek", "Text label")}</option>
-              <option value="text_qr" ${this._labelVariant === "text_qr" ? "selected" : ""}>${this._t("Text + QR kód", "Text + QR code")}</option>
-              <option value="qr" ${this._labelVariant === "qr" ? "selected" : ""}>${this._t("Pouze QR kód", "QR code only")}</option>
-            </select></label>
-            <button id="download-labels" ${this._buildingLabels ? "disabled" : ""}>${this._buildingLabels ? this._t("Vytvářím PDF…", "Creating PDF…") : this._t("Vytvořit štítky (PDF)", "Create labels (PDF)")}</button>
+            <button id="bulk-enable">${"Audit displayed"}</button>
+            <button id="bulk-disable">${"Disable audit"}</button>
+            <button id="export">${"Export CSV"}</button>
+            <button id="download-labels" ${this._buildingLabels ? "disabled" : ""}>${this._buildingLabels ? "Creating PDF…" : "Create labels (PDF)"}</button>
           </div>
           <div class="filters">
-          <select id="device-filter" class="device-filter" aria-label="${this._t("Filtrovat podle zařízení", "Filter by device")}">
-            <option value="">${this._t("Všechna zařízení", "All devices")}</option>
-            <option value="__none__" ${this._device === "__none__" ? "selected" : ""}>${this._t("Bez zařízení", "No device")}</option>
+          <select id="device-filter" class="device-filter" aria-label="${"Filter by device"}">
+            <option value="">${"All devices"}</option>
+            <option value="__none__" ${this._device === "__none__" ? "selected" : ""}>${"No device"}</option>
             ${devices.map(([id, name]) => `<option value="${this._escape(id)}" ${this._device === id ? "selected" : ""}>${this._escape(name)}</option>`).join("")}
           </select>
-          <select id="manufacturer-filter" aria-label="${this._t("Filtrovat podle výrobce", "Filter by manufacturer")}">
-            <option value="">${this._t("Všichni výrobci", "All manufacturers")}</option>
-            <option value="__none__" ${this._manufacturer === "__none__" ? "selected" : ""}>${this._t("Neznámý výrobce", "Unknown manufacturer")}</option>
+          <select id="manufacturer-filter" aria-label="${"Filter by manufacturer"}">
+            <option value="">${"All manufacturers"}</option>
+            <option value="__none__" ${this._manufacturer === "__none__" ? "selected" : ""}>${"Unknown manufacturer"}</option>
             ${manufacturers.map(([value, label]) => `<option value="${this._escape(value)}" ${this._manufacturer === value ? "selected" : ""}>${this._escape(label)}</option>`).join("")}
           </select>
-          <select id="model-filter" aria-label="${this._t("Filtrovat podle modelu", "Filter by model")}">
-            <option value="">${this._t("Všechny modely", "All models")}</option>
-            <option value="__none__" ${this._model === "__none__" ? "selected" : ""}>${this._t("Neznámý model", "Unknown model")}</option>
+          <select id="model-filter" aria-label="${"Filter by model"}">
+            <option value="">${"All models"}</option>
+            <option value="__none__" ${this._model === "__none__" ? "selected" : ""}>${"Unknown model"}</option>
             ${models.map(([value, label]) => `<option value="${this._escape(value)}" ${this._model === value ? "selected" : ""}>${this._escape(label)}</option>`).join("")}
           </select>
-          <select id="platform-filter" aria-label="${this._t("Filtrovat podle integrace", "Filter by integration")}">
-            <option value="">${this._t("Všechny integrace", "All integrations")}</option>
+          <select id="platform-filter" aria-label="${"Filter by integration"}">
+            <option value="">${"All integrations"}</option>
             ${platforms.map(([value, label]) => `<option value="${this._escape(value)}" ${this._platform === value ? "selected" : ""}>${this._escape(label)}</option>`).join("")}
           </select>
-          <select id="area-filter" aria-label="${this._t("Filtrovat podle oblasti", "Filter by area")}">
-            <option value="">${this._t("Všechny oblasti", "All areas")}</option>
-            <option value="__none__" ${this._area === "__none__" ? "selected" : ""}>${this._t("Bez oblasti", "No area")}</option>
+          <select id="area-filter" aria-label="${"Filter by area"}">
+            <option value="">${"All areas"}</option>
+            <option value="__none__" ${this._area === "__none__" ? "selected" : ""}>${"No area"}</option>
             ${areas.map(([value, label]) => `<option value="${this._escape(value)}" ${this._area === value ? "selected" : ""}>${this._escape(label)}</option>`).join("")}
           </select>
-          <select id="domain-filter" aria-label="${this._t("Filtrovat podle typu entity", "Filter by entity type")}">
-            <option value="">${this._t("Všechny typy entit", "All entity types")}</option>
+          <select id="domain-filter" aria-label="${"Filter by entity type"}">
+            <option value="">${"All entity types"}</option>
             ${domains.map(([value, label]) => `<option value="${this._escape(value)}" ${this._domain === value ? "selected" : ""}>${this._escape(label)}</option>`).join("")}
           </select>
-          <select id="audit-filter" aria-label="${this._t("Filtrovat podle auditu", "Filter by audit")}">
-            <option value="">${this._t("Audit zapnutý i vypnutý", "All audit states")}</option>
-            <option value="enabled" ${this._audit === "enabled" ? "selected" : ""}>${this._t("Audit zapnutý", "Audit enabled")}</option>
-            <option value="disabled" ${this._audit === "disabled" ? "selected" : ""}>${this._t("Audit vypnutý", "Audit disabled")}</option>
+          <select id="audit-filter" aria-label="${"Filter by audit"}">
+            <option value="">${"All audit states"}</option>
+            <option value="enabled" ${this._audit === "enabled" ? "selected" : ""}>${"Audit enabled"}</option>
+            <option value="disabled" ${this._audit === "disabled" ? "selected" : ""}>${"Audit disabled"}</option>
           </select>
           </div>
         </section>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>${this._t("Entita", "Entity")}</th><th>${this._t("Stav", "State")}</th><th>${this._t("Zařízení", "Device")}</th><th>${this._t("Integrace", "Integration")}</th><th>${this._t("Auditovat", "Audit")}</th><th>${this._t("Historie", "History")}</th></tr></thead>
+            <thead><tr><th>${"Entity"}</th><th>${"State"}</th><th>${"Device"}</th><th>${"Integration"}</th><th>${"Audit"}</th><th>${"History"}</th></tr></thead>
             <tbody>${groups.map((group) => `${this._groupBy !== "none" ? `
-              <tr class="group-row"><td colspan="6">${this._escape(group.label)}<span class="group-summary">${group.rows.length} ${this._t("entit", "entities")} · ${group.rows.filter((entity) => entity.problem).length} ${this._t("problémů", "problems")} · ${group.rows.filter((entity) => entity.logging).length} ${this._t("auditovaných", "audited")}</span></td></tr>` : ""}
+              <tr class="group-row"><td colspan="6">${this._escape(group.label)}<span class="group-summary">${group.rows.length} ${"entities"} · ${group.rows.filter((entity) => entity.problem).length} ${"problems"} · ${group.rows.filter((entity) => entity.logging).length} ${"audited"}</span></td></tr>` : ""}
               ${group.rows.map((entity) => {
                 const index = rowIndexes.get(entity.entity_id);
                 return `<tr>
-                  <td><div class="name">${this._escape(entity.name)}</div><div class="entity-id">${this._escape(entity.entity_id)}${entity.disabled ? ` · ${this._t("vypnuto", "disabled")}` : ""}</div></td>
-                  <td><button class="state-button" data-index="${index}" title="${this._t("Zobrazit detail entity", "Show entity details")}">${entity.problem ? `<span class="badge problem">${this._escape(entity.problem)}</span>` : `<span class="badge">${this._escape(entity.state ?? "—")}</span>`}</button></td>
-                  <td><div>${this._escape(entity.device_name || this._t("Bez zařízení", "No device"))}</div><div class="muted">${this._escape([entity.manufacturer, entity.model, entity.area_name, entity.ip_address ? `IP: ${entity.ip_address}` : "", entity.mac_address ? `MAC: ${entity.mac_address}` : ""].filter(Boolean).join(" · "))}</div></td>
+                  <td><div class="name">${this._escape(entity.name)}</div><div class="entity-id">${this._escape(entity.entity_id)}${entity.disabled ? ` · ${"disabled"}` : ""}</div></td>
+                  <td><button class="state-button" data-index="${index}" title="${"Show entity details"}">${entity.problem ? `<span class="badge problem">${this._escape(entity.problem)}</span>` : `<span class="badge">${this._escape(entity.state ?? "—")}</span>`}</button></td>
+                  <td><div>${this._escape(entity.device_name || "No device")}</div><div class="muted">${this._escape([entity.manufacturer, entity.model, entity.area_name, entity.ip_address ? `IP: ${entity.ip_address}` : "", entity.mac_address ? `MAC: ${entity.mac_address}` : ""].filter(Boolean).join(" · "))}</div></td>
                   <td>${this._escape(entity.platform || "—")}</td>
                   <td><input class="switch toggle" data-index="${index}" type="checkbox" ${entity.logging ? "checked" : ""} aria-label="Audit ${this._escape(entity.entity_id)}"></td>
-                  <td><button class="link history-button" data-index="${index}">${entity.event_count} ${this._t("záznamů", "events")}</button></td>
+                  <td><button class="link history-button" data-index="${index}">${entity.event_count} ${"events"}</button></td>
                 </tr>`;
-              }).join("")}`).join("") || `<tr><td class="empty" colspan="6">${this._t("Žádné odpovídající entity", "No matching entities")}</td></tr>`}</tbody>
+              }).join("")}`).join("") || `<tr><td class="empty" colspan="6">${"No matching entities"}</td></tr>`}</tbody>
           </table>
         </div>
       </main>
       ${this._selected ? `<dialog open>
-        <div class="dialog-head"><div><h2>${this._escape(this._selected.name)}</h2><div class="entity-id">${this._escape(this._selected.entity_id)}</div></div><button id="clear">${this._t("Smazat historii", "Clear history")}</button><button id="close">✕</button></div>
+        <div class="dialog-head"><div><h2>${this._escape(this._selected.name)}</h2><div class="entity-id">${this._escape(this._selected.entity_id)}</div></div><button id="clear">${"Clear history"}</button><button id="close">✕</button></div>
         <div class="dialog-body">
-          ${this._history.map((event) => `<div class="history"><span>${this._escape(new Date(event.timestamp).toLocaleString())}</span><span class="event-${this._escape(event.type)}">${this._escape(event.type)}</span><span>${this._escape(event.old_state ?? "—")} → ${this._escape(event.new_state ?? "—")}</span></div>`).join("") || `<div class="empty">${this._t("Zatím bez záznamů", "No records yet")}</div>`}
-        </div>
-      </dialog>` : ""}
-      ${this._activityLogOpen ? `<dialog class="activity-dialog" open>
-        <div class="dialog-head"><div><h2>${this._t("Historie akcí a chyb", "Action and error history")}</h2><div class="entity-id">${this._t("Uloženo pouze lokálně", "Stored locally only")}</div></div><button id="clear-activity" ${this._activity.length ? "" : "disabled"}>${this._t("Vymazat", "Clear")}</button><button id="close-activity" aria-label="${this._t("Zavřít historii akcí", "Close action history")}">✕</button></div>
-        <div class="activity-controls">
-          <label class="filter"><input id="activity-enabled" type="checkbox" ${this._activityEnabled ? "checked" : ""}> ${this._t("Zaznamenávat akce a chyby", "Record actions and errors")}</label>
-          <span class="activity-summary">${this._t("Automatická retence", "Automatic retention")}: ${this._activityRetentionDays ?? "—"} ${this._t("dní", "days")} · ${this._activityCount} ${this._t("záznamů", "records")}</span>
-        </div>
-        <div class="dialog-body">
-          ${this._activityError ? `<div class="scanner-error">${this._escape(this._activityError)}</div>` : ""}
-          ${this._activityLoading ? `<div class="empty">${this._t("Načítám…", "Loading…")}</div>` : this._activity.map((event) => `<div class="activity-entry ${event.level === "error" ? "error" : ""}"><span>${this._escape(new Date(event.timestamp).toLocaleString())}</span><span class="activity-level">${this._escape(event.level === "error" ? this._t("chyba", "error") : this._t("akce", "action"))}</span><span class="activity-detail">${this._escape(this._activityText(event))}</span></div>`).join("") || `<div class="empty">${this._t("Zatím bez záznamů", "No records yet")}</div>`}
+          ${this._history.map((event) => `<div class="history"><span>${this._escape(new Date(event.timestamp).toLocaleString())}</span><span class="event-${this._escape(event.type)}">${this._escape(event.type)}</span><span>${this._escape(event.old_state ?? "—")} → ${this._escape(event.new_state ?? "—")}</span></div>`).join("") || `<div class="empty">${"No records yet"}</div>`}
         </div>
       </dialog>` : ""}
       </ha-top-app-bar-fixed>
     `;
 
-    this.shadowRoot.querySelector("#open-activity")?.addEventListener("click", () => this._openActivityLog());
     this.shadowRoot.querySelector("#open-scanner")?.addEventListener("click", () => this._startScanner());
     this.shadowRoot.querySelector("#refresh")?.addEventListener("click", () => { this._recordActivity("inventory_refreshed"); this._load(); });
     this.shadowRoot.querySelector("#toggle-filters")?.addEventListener("click", () => {
@@ -1436,9 +1245,6 @@ class EntityAuditPanel extends HTMLElement {
     this.shadowRoot.querySelector("#bulk-enable")?.addEventListener("click", () => this._bulkSet(rows, true));
     this.shadowRoot.querySelector("#bulk-disable")?.addEventListener("click", () => this._bulkSet(rows, false));
     this.shadowRoot.querySelector("#export")?.addEventListener("click", () => this._exportCsv(rows));
-    this.shadowRoot.querySelector("#label-width")?.addEventListener("input", (event) => { this._labelWidth = event.target.value; });
-    this.shadowRoot.querySelector("#label-height")?.addEventListener("input", (event) => { this._labelHeight = event.target.value; });
-    this.shadowRoot.querySelector("#label-variant")?.addEventListener("change", (event) => { this._labelVariant = event.target.value; this._revokeLabelPdf(); this._render(); });
     this.shadowRoot.querySelector("#download-labels")?.addEventListener("click", () => this._downloadLabelsPdf(rows));
     this.shadowRoot.querySelector("#share-label-pdf")?.addEventListener("click", () => this._shareLabelPdf());
     this.shadowRoot.querySelector("#discard-label-pdf")?.addEventListener("click", () => { this._revokeLabelPdf(); this._render(); });
@@ -1447,13 +1253,10 @@ class EntityAuditPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll(".state-button").forEach((button) => button.addEventListener("click", () => this._showEntity(rows[Number(button.dataset.index)].entity_id)));
     this.shadowRoot.querySelector("#close")?.addEventListener("click", () => { this._selected = null; this._render(); });
     this.shadowRoot.querySelector("#clear")?.addEventListener("click", () => this._clear());
-    this.shadowRoot.querySelector("#close-activity")?.addEventListener("click", () => { this._activityLogOpen = false; this._render(); });
-    this.shadowRoot.querySelector("#activity-enabled")?.addEventListener("change", (event) => this._setActivityEnabled(event.target.checked));
-    this.shadowRoot.querySelector("#clear-activity")?.addEventListener("click", () => this._clearActivity());
     if (this._scannerOpen && typeof document !== "undefined") this._renderScannerDialog();
   }
 }
 
-if (!customElements.get("entity-audit-panel-v0316")) {
-  customElements.define("entity-audit-panel-v0316", EntityAuditPanel);
+if (!customElements.get("entity-audit-panel-v0317")) {
+  customElements.define("entity-audit-panel-v0317", EntityAuditPanel);
 }

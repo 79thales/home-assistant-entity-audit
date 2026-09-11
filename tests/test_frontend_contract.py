@@ -32,6 +32,12 @@ QR_READER_LICENSE_FILE = (
 )
 MANAGER_FILE = ROOT / "custom_components" / "entity_audit" / "manager.py"
 WEBSOCKET_FILE = ROOT / "custom_components" / "entity_audit" / "websocket.py"
+CONFIG_FLOW_FILE = ROOT / "custom_components" / "entity_audit" / "config_flow.py"
+DIAGNOSTICS_FILE = ROOT / "custom_components" / "entity_audit" / "diagnostics.py"
+STRINGS_FILE = ROOT / "custom_components" / "entity_audit" / "strings.json"
+TRANSLATIONS_EN_FILE = (
+    ROOT / "custom_components" / "entity_audit" / "translations" / "en.json"
+)
 
 
 class FrontendContractTest(unittest.TestCase):
@@ -65,11 +71,12 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn("devices.get(entity.ip_address)", frontend)
         self.assertIn("devices.set(entity.ip_address, entity)", frontend)
         self.assertIn("manufacturerLabel", frontend)
-        self.assertIn('id="label-width"', frontend)
-        self.assertIn('id="label-height"', frontend)
-        self.assertIn('id="label-variant"', frontend)
-        self.assertIn('value="text_qr"', frontend)
-        self.assertIn('value="qr"', frontend)
+        self.assertNotIn('id="label-width"', frontend)
+        self.assertNotIn('id="label-height"', frontend)
+        self.assertNotIn('id="label-variant"', frontend)
+        self.assertIn("CONF_LABEL_WIDTH", CONFIG_FLOW_FILE.read_text(encoding="utf-8"))
+        self.assertIn("CONF_LABEL_HEIGHT", CONFIG_FLOW_FILE.read_text(encoding="utf-8"))
+        self.assertIn("CONF_LABEL_VARIANT", CONFIG_FLOW_FILE.read_text(encoding="utf-8"))
         self.assertIn("_labelQrPayload", frontend)
         self.assertIn('type: "application/pdf"', frontend)
         self.assertNotIn("window.open(", frontend)
@@ -128,17 +135,19 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn('id="toggle-filters"', frontend)
         self.assertIn(".filter-panel:not(.open)", frontend)
 
-    def test_action_and_error_history_is_local_and_bounded(self) -> None:
+    def test_settings_and_action_history_use_the_integration_page(self) -> None:
         frontend = FRONTEND_FILE.read_text(encoding="utf-8")
         manager = MANAGER_FILE.read_text(encoding="utf-8")
         websocket = WEBSOCKET_FILE.read_text(encoding="utf-8")
+        config_flow = CONFIG_FLOW_FILE.read_text(encoding="utf-8")
+        diagnostics = DIAGNOSTICS_FILE.read_text(encoding="utf-8")
 
-        self.assertIn('id="open-activity"', frontend)
-        self.assertIn('id="activity-enabled"', frontend)
-        self.assertIn('id="clear-activity"', frontend)
+        self.assertNotIn('id="open-activity"', frontend)
+        self.assertNotIn('id="activity-enabled"', frontend)
+        self.assertNotIn('id="clear-activity"', frontend)
         self.assertIn("_recordActivity(\"qr_camera_failed\"", frontend)
         self.assertIn("_recordActivity(\"qr_camera_environment\"", frontend)
-        self.assertIn("id=\"camera-wait\"", frontend)
+        self.assertNotIn("id=\"camera-wait\"", frontend)
         self.assertIn("id=\"retry-camera\"", frontend)
         self.assertIn("_scheduleCameraWaitTimer", frontend)
         self.assertIn("this._scannerDialog.showModal()", frontend)
@@ -146,12 +155,32 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn("ACTIVITY_EVENT_TYPES", CONST_FILE.read_text(encoding="utf-8"))
         self.assertIn("def _prune_activity", manager)
         self.assertIn('"retention_days": self.retention_days', manager)
-        self.assertIn("entity_audit/get_activity", frontend)
-        self.assertIn("entity_audit/set_activity_enabled", frontend)
-        self.assertIn("entity_audit/clear_activity", frontend)
-        self.assertIn('f"{DOMAIN}/get_activity"', websocket)
+        self.assertIn("entity_audit/get_settings", frontend)
+        self.assertIn('f"{DOMAIN}/get_settings"', websocket)
         self.assertIn("vol.In(ACTIVITY_EVENT_TYPES)", websocket)
         self.assertIn("@websocket_api.require_admin", websocket)
+        self.assertIn("CONF_ACTIVITY_LOG_ENABLED", config_flow)
+        self.assertIn("CONF_CAMERA_WAIT_SECONDS", config_flow)
+        self.assertIn("CONF_CLEAR_ACTIVITY_HISTORY", config_flow)
+        self.assertIn("async_get_config_entry_diagnostics", diagnostics)
+        self.assertIn("manager.get_diagnostics()", diagnostics)
+        self.assertIn('"action_and_error_history"', manager)
+
+    def test_panel_and_config_flow_are_english_only(self) -> None:
+        frontend = FRONTEND_FILE.read_text(encoding="utf-8")
+        translations = json.loads(TRANSLATIONS_EN_FILE.read_text(encoding="utf-8"))
+        strings = json.loads(STRINGS_FILE.read_text(encoding="utf-8"))
+
+        self.assertNotIn("this._t(", frontend)
+        self.assertFalse(
+            (ROOT / "custom_components" / "entity_audit" / "translations" / "cs.json").exists()
+        )
+        self.assertIn("options", translations)
+        self.assertEqual(strings, translations)
+        self.assertEqual(
+            translations["options"]["step"]["init"]["data"]["camera_wait_seconds"],
+            "Camera startup timeout (seconds)",
+        )
 
     def test_panel_runs_in_home_assistant_dom_for_system_toolbar(self) -> None:
         registration = INIT_FILE.read_text(encoding="utf-8")

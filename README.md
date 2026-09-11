@@ -14,19 +14,19 @@ Entity Audit is a HACS-compatible custom integration that gives administrators o
 - filters by device, manufacturer, model, integration, area, entity domain, problem, and audit status;
 - enables or disables auditing in bulk for the currently filtered entities;
 - exports the currently filtered entity list to a UTF-8 CSV file, including available IP and MAC addresses;
-- creates a downloadable A4 PDF label sheet for the currently filtered devices with an IP address, deduplicated by IP address, including manufacturer, area, IP, and MAC address; set the label width and height in millimeters, then open, save, print, or share the generated PDF;
+- creates a downloadable A4 PDF label sheet for the currently filtered devices with an IP address, deduplicated by IP address, including manufacturer, area, IP, and MAC address; configure the label dimensions and variant in the integration settings, then open, save, print, or share the generated PDF;
 - offers text-only, text-with-QR, and QR-only label variants; QR payloads contain the complete label data and are generated locally in the browser;
 - scans Entity Audit QR labels with the device camera or an existing photo/file, displays a virtual label, and matches it to the current inventory by MAC or IP address; live-camera startup waits up to an editable 5-second default before offering the photo/file fallback;
 - opens the matched Home Assistant device page directly or filters the inventory to that device;
 - opens the native Home Assistant entity detail by clicking its current state;
-- keeps an optional local action and error history for panel actions, exports, label generation, and QR scanner diagnostics; it can be cleared or disabled from the panel;
+- keeps an optional local action and error history for panel actions, exports, label generation, and QR scanner diagnostics; manage it and download it from the integration page;
 - uses Home Assistant's system app bar with native sidebar navigation and mobile safe-area handling;
 - flags current `unavailable` and `unknown` states, plus active entity-registry entries that are missing from the runtime state machine;
 - enables or disables audit logging separately for every entity;
 - records state transitions, problem starts, and recoveries;
 - shows a bounded per-entity timeline in an administrator-only sidebar panel;
 - stores data locally in Home Assistant `.storage` with configurable retention and event limits;
-- includes Czech and English configuration text and panel labels.
+- uses English-only integration configuration and panel labels.
 
 Entity Audit complements Home Assistant's built-in Recorder, History, and Activity features. Its opt-in timeline is stored independently and starts only after auditing is enabled for an entity; it does not query or backfill Recorder data. It is intended as a compact diagnostic audit, not a replacement for long-term statistics.
 
@@ -47,7 +47,13 @@ Until the repository is accepted into the HACS default catalog, add `https://git
 
 The default retention is 30 days and 500 events per entity. The enabled-entity list and audit history are stored locally in Home Assistant's `.storage/entity_audit.storage` file. Each audit record contains a timestamp, event category, and old/new state values; entity attributes are not stored in audit history. For the current inventory display only, an IP address may be shown when Home Assistant already supplies a literal IP in an entity attribute, a device configuration URL, or one of the common address fields (`ip_address`, `ip`, `host`, or `address`) in the integration's config entry. A MAC address may be shown when it exists in the device registry. No hostname lookup or network discovery is performed. The integration does not send inventory data to an external service.
 
-The action and error history is enabled by default and is also stored locally. It uses the same configurable age retention as entity auditing and keeps at most 1,000 records. Each record contains a timestamp, a fixed action/error type, a severity, and—where useful—an entity ID, device ID, count, browser error name, or non-identifying camera-environment flags (protocol, secure-context/API availability, and visibility). It does not retain state attributes, QR payloads, photos, camera video, server address, IP or MAC addresses, tokens, or credentials. An administrator can disable new action/error records or clear the history from the panel at any time.
+The action and error history is enabled by default and is also stored locally. It uses the same configurable age retention as entity auditing and keeps at most 1,000 records. Each record contains a timestamp, a fixed action/error type, a severity, and—where useful—an entity ID, device ID, count, browser error name, or non-identifying camera-environment flags (protocol, secure-context/API availability, and visibility). It does not retain state attributes, QR payloads, photos, camera video, server address, IP or MAC addresses, tokens, or credentials.
+
+## Settings and logs
+
+Open **Settings → Devices & services → Entity Audit → Configure** to manage retention, audit event limits, action/error logging, QR camera startup timeout, and device-label dimensions and variant. Use **Clear action and error history now** to erase the local action/error history.
+
+Use the integration's three-dot menu and select **Download diagnostics** to download the configured settings and the bounded local action/error history. The diagnostics file applies Home Assistant's standard sensitive-value redaction.
 
 QR labels are generated entirely in the browser with the bundled MIT-licensed `qrcode-generator` library. Scanning uses the bundled Apache-2.0-licensed `jsQR` decoder. Generation and decoding are local: label images and decoded label data are not sent to a QR-code service. Camera access is requested only when the administrator opens the scanner; a photo capture/file option is available when live camera access is unavailable.
 

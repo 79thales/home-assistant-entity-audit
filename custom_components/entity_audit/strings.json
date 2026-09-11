@@ -3,10 +3,15 @@
     "step": {
       "user": {
         "title": "Entity Audit",
-        "description": "Set limits for locally stored opt-in entity audit records.",
+        "description": "Configure locally stored audit records, labels, and QR scanner behavior.",
         "data": {
           "retention_days": "Retention (days)",
-          "max_events_per_entity": "Maximum events per entity"
+          "max_events_per_entity": "Maximum events per entity",
+          "activity_log_enabled": "Record action and error history",
+          "camera_wait_seconds": "Camera startup timeout (seconds)",
+          "label_width_mm": "Device label width (mm)",
+          "label_height_mm": "Device label height (mm)",
+          "label_variant": "Device label variant"
         }
       }
     },
@@ -18,12 +23,18 @@
     "step": {
       "init": {
         "title": "Entity Audit settings",
+        "description": "Action and error records are available from the integration menu through Download diagnostics.",
         "data": {
           "retention_days": "Retention (days)",
-          "max_events_per_entity": "Maximum events per entity"
+          "max_events_per_entity": "Maximum events per entity",
+          "activity_log_enabled": "Record action and error history",
+          "camera_wait_seconds": "Camera startup timeout (seconds)",
+          "label_width_mm": "Device label width (mm)",
+          "label_height_mm": "Device label height (mm)",
+          "label_variant": "Device label variant",
+          "clear_activity_history": "Clear action and error history now"
         }
       }
     }
   }
 }
-

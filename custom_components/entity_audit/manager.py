@@ -26,7 +26,17 @@ from .network import find_ip_address, find_mac_address
 class EntityAuditManager:
     """Track explicitly enabled entities and retain a bounded audit history."""
 
-    def __init__(self, hass: HomeAssistant, retention_days: int, max_events: int) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        retention_days: int,
+        max_events: int,
+        activity_log_enabled: bool | None,
+        camera_wait_seconds: int,
+        label_width: int,
+        label_height: int,
+        label_variant: str,
+    ) -> None:
         self.hass = hass
         self.retention_days = retention_days
         self.max_events = max_events
@@ -34,6 +44,11 @@ class EntityAuditManager:
         self._enabled: set[str] = set()
         self._history: dict[str, list[dict[str, Any]]] = {}
         self._activity_enabled = DEFAULT_ACTIVITY_LOG_ENABLED
+        self._configured_activity_log_enabled = activity_log_enabled
+        self.camera_wait_seconds = camera_wait_seconds
+        self.label_width = label_width
+        self.label_height = label_height
+        self.label_variant = label_variant
         self._activity: list[dict[str, str]] = []
         self._unsub = None
 
@@ -42,8 +57,13 @@ class EntityAuditManager:
         data = await self._store.async_load() or {}
         self._enabled = set(data.get("enabled", []))
         self._history = data.get("history", {})
-        self._activity_enabled = bool(
+        stored_activity_enabled = bool(
             data.get("activity_enabled", DEFAULT_ACTIVITY_LOG_ENABLED)
+        )
+        self._activity_enabled = (
+            stored_activity_enabled
+            if self._configured_activity_log_enabled is None
+            else self._configured_activity_log_enabled
         )
         self._activity = [
             record
@@ -131,15 +151,25 @@ class EntityAuditManager:
         }
 
     @callback
-    def set_activity_enabled(self, enabled: bool) -> None:
-        """Enable or disable locally stored panel activity records."""
-        if enabled:
-            self._activity_enabled = True
-            self.log_activity("activity_log_enabled")
-        else:
-            self.log_activity("activity_log_disabled")
-            self._activity_enabled = False
-            self._store.async_delay_save(self._data, 1)
+    def get_settings(self) -> dict[str, Any]:
+        """Return administrator-configured panel settings."""
+        return {
+            "activity_log_enabled": self._activity_enabled,
+            "retention_days": self.retention_days,
+            "max_events_per_entity": self.max_events,
+            "camera_wait_seconds": self.camera_wait_seconds,
+            "label_width_mm": self.label_width,
+            "label_height_mm": self.label_height,
+            "label_variant": self.label_variant,
+        }
+
+    @callback
+    def get_diagnostics(self) -> dict[str, Any]:
+        """Return bounded local settings and action/error records."""
+        return {
+            "settings": self.get_settings(),
+            "action_and_error_history": self.get_activity(MAX_ACTIVITY_EVENTS),
+        }
 
     @callback
     def clear_activity(self) -> None:

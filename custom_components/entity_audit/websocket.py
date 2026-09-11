@@ -18,10 +18,8 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_set_logging)
     websocket_api.async_register_command(hass, ws_set_logging_bulk)
     websocket_api.async_register_command(hass, ws_clear_history)
-    websocket_api.async_register_command(hass, ws_get_activity)
+    websocket_api.async_register_command(hass, ws_get_settings)
     websocket_api.async_register_command(hass, ws_log_activity)
-    websocket_api.async_register_command(hass, ws_set_activity_enabled)
-    websocket_api.async_register_command(hass, ws_clear_activity)
 
 
 def _manager(hass: HomeAssistant) -> EntityAuditManager:
@@ -99,16 +97,11 @@ async def ws_clear_history(hass, connection, msg) -> None:
 
 
 @websocket_api.require_admin
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/get_activity",
-        vol.Optional("limit", default=200): vol.All(int, vol.Range(min=1, max=1000)),
-    }
-)
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/get_settings"})
 @websocket_api.async_response
-async def ws_get_activity(hass, connection, msg) -> None:
-    """Return the local panel action and error log."""
-    connection.send_result(msg["id"], _manager(hass).get_activity(msg["limit"]))
+async def ws_get_settings(hass, connection, msg) -> None:
+    """Return administrator-configured panel settings."""
+    connection.send_result(msg["id"], _manager(hass).get_settings())
 
 
 @websocket_api.require_admin
@@ -127,28 +120,3 @@ async def ws_log_activity(hass, connection, msg) -> None:
         msg["event_type"], msg["level"], msg.get("detail")
     )
     connection.send_result(msg["id"], {"success": True})
-
-
-@websocket_api.require_admin
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/set_activity_enabled",
-        vol.Required("enabled"): bool,
-    }
-)
-@websocket_api.async_response
-async def ws_set_activity_enabled(hass, connection, msg) -> None:
-    """Enable or disable local panel activity logging."""
-    manager = _manager(hass)
-    manager.set_activity_enabled(msg["enabled"])
-    connection.send_result(msg["id"], manager.get_activity(1))
-
-
-@websocket_api.require_admin
-@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/clear_activity"})
-@websocket_api.async_response
-async def ws_clear_activity(hass, connection, msg) -> None:
-    """Clear the local panel action and error log."""
-    manager = _manager(hass)
-    manager.clear_activity()
-    connection.send_result(msg["id"], manager.get_activity(1))
