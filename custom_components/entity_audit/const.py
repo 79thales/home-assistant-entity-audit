@@ -12,5 +12,6 @@ DEFAULT_MAX_EVENTS = 500
 PROBLEM_STATES = {"unavailable", "unknown"}
 PANEL_URL = "/entity_audit/entity-audit-panel.js"
 QR_LIBRARY_URL = "/entity_audit/qrcode.js"
-PANEL_MODULE_URL = f"{PANEL_URL}?v=0.3.11"
-PANEL_ELEMENT = "entity-audit-panel-v0311"
+QR_READER_LIBRARY_URL = "/entity_audit/jsQR.js"
+PANEL_MODULE_URL = f"{PANEL_URL}?v=0.3.12"
+PANEL_ELEMENT = "entity-audit-panel-v0312"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import unittest
@@ -20,8 +21,14 @@ FRONTEND_FILE = (
 MANIFEST_FILE = ROOT / "custom_components" / "entity_audit" / "manifest.json"
 INIT_FILE = ROOT / "custom_components" / "entity_audit" / "__init__.py"
 QR_LIBRARY_FILE = ROOT / "custom_components" / "entity_audit" / "frontend" / "qrcode.js"
+QR_READER_LIBRARY_FILE = (
+    ROOT / "custom_components" / "entity_audit" / "frontend" / "jsQR.js"
+)
 QR_LICENSE_FILE = (
     ROOT / "custom_components" / "entity_audit" / "frontend" / "QRCODE-LICENSE.txt"
+)
+QR_READER_LICENSE_FILE = (
+    ROOT / "custom_components" / "entity_audit" / "frontend" / "JSQR-LICENSE.txt"
 )
 
 
@@ -73,6 +80,37 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn("StaticPathConfig(\n                    QR_LIBRARY_URL", registration)
         self.assertTrue(QR_LIBRARY_FILE.is_file())
         self.assertIn("MIT License", QR_LICENSE_FILE.read_text(encoding="utf-8"))
+
+    def test_qr_reader_is_bundled_and_served_locally(self) -> None:
+        constants = CONST_FILE.read_text(encoding="utf-8")
+        registration = INIT_FILE.read_text(encoding="utf-8")
+        frontend = FRONTEND_FILE.read_text(encoding="utf-8")
+
+        self.assertIn('QR_READER_LIBRARY_URL = "/entity_audit/jsQR.js"', constants)
+        self.assertIn(
+            "StaticPathConfig(\n                    QR_READER_LIBRARY_URL", registration
+        )
+        self.assertTrue(QR_READER_LIBRARY_FILE.is_file())
+        self.assertEqual(
+            hashlib.sha256(QR_READER_LIBRARY_FILE.read_bytes()).hexdigest(),
+            "3325b0888fa4745c4e6940897d8c4f426fbaae76901fcbfe1871a04e90a51655",
+        )
+        self.assertIn(
+            "Apache License",
+            QR_READER_LICENSE_FILE.read_text(encoding="utf-8"),
+        )
+        self.assertIn('id="open-scanner"', frontend)
+        self.assertIn("navigator.mediaDevices?.getUserMedia", frontend)
+        self.assertIn(
+            'id="scan-camera-image" type="file" accept="image/*" '
+            'capture="environment"',
+            frontend,
+        )
+        self.assertIn('id="scan-image" type="file" accept="image/*"', frontend)
+        self.assertIn("_parseLabelQr", frontend)
+        self.assertIn("_matchScannedDevice", frontend)
+        self.assertIn('href="/config/devices/device/', frontend)
+        self.assertIn("this._escape(this._scanResult.name)", frontend)
 
     def test_system_toolbar_keeps_search_and_filters_available(self) -> None:
         frontend = FRONTEND_FILE.read_text(encoding="utf-8")

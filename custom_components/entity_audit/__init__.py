@@ -19,6 +19,7 @@ from .const import (
     PANEL_MODULE_URL,
     PANEL_URL,
     QR_LIBRARY_URL,
+    QR_READER_LIBRARY_URL,
 )
 from .manager import EntityAuditManager
 from .websocket import async_register_websocket_commands
@@ -51,6 +52,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 ),
                 StaticPathConfig(
                     QR_LIBRARY_URL, str(frontend_path / "qrcode.js"), False
+                ),
+                StaticPathConfig(
+                    QR_READER_LIBRARY_URL, str(frontend_path / "jsQR.js"), False
                 ),
             ]
         )

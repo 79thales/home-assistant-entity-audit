@@ -16,6 +16,8 @@ Entity Audit is a HACS-compatible custom integration that gives administrators o
 - exports the currently filtered entity list to a UTF-8 CSV file, including available IP and MAC addresses;
 - creates a downloadable A4 PDF label sheet for the currently filtered devices with an IP address, deduplicated by IP address, including manufacturer, area, IP, and MAC address; set the label width and height in millimeters, then open, save, print, or share the generated PDF;
 - offers text-only, text-with-QR, and QR-only label variants; QR payloads contain the complete label data and are generated locally in the browser;
+- scans Entity Audit QR labels with the device camera or an existing photo, displays a virtual label, and matches it to the current inventory by MAC or IP address;
+- opens the matched Home Assistant device page directly or filters the inventory to that device;
 - opens the native Home Assistant entity detail by clicking its current state;
 - uses Home Assistant's system app bar with native sidebar navigation and mobile safe-area handling;
 - flags current `unavailable` and `unknown` states, plus active entity-registry entries that are missing from the runtime state machine;
@@ -44,7 +46,7 @@ Until the repository is accepted into the HACS default catalog, add `https://git
 
 The default retention is 30 days and 500 events per entity. The enabled-entity list and audit history are stored locally in Home Assistant's `.storage/entity_audit.storage` file. Each audit record contains a timestamp, event category, and old/new state values; entity attributes are not stored in audit history. For the current inventory display only, an IP address may be shown when Home Assistant already supplies a literal IP in an entity attribute, a device configuration URL, or one of the common address fields (`ip_address`, `ip`, `host`, or `address`) in the integration's config entry. A MAC address may be shown when it exists in the device registry. No hostname lookup or network discovery is performed. The integration does not send inventory data to an external service.
 
-QR labels are generated entirely in the browser with the bundled MIT-licensed `qrcode-generator` library. Label data is not sent to a QR-code service.
+QR labels are generated entirely in the browser with the bundled MIT-licensed `qrcode-generator` library. Scanning uses the bundled Apache-2.0-licensed `jsQR` decoder. Generation and decoding are local: label images and decoded label data are not sent to a QR-code service. Camera access is requested only when the administrator opens the scanner; a photo capture/file option is available when live camera access is unavailable.
 
 Disabling auditing stops future recording without deleting existing history. Stored records remain subject to the configured age and per-entity limits and can also be deleted manually from the panel.
 
@@ -67,6 +69,7 @@ The repository includes local brand assets and automated HACS and Hassfest valid
 python -m compileall custom_components/entity_audit
 python -m json.tool custom_components/entity_audit/manifest.json
 node --check custom_components/entity_audit/frontend/entity-audit-panel.js
+node tests/test_qrcode.js
 ```
 
 ## License
