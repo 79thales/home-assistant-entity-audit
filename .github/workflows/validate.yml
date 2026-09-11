@@ -17,6 +17,8 @@ jobs:
         run: python -m compileall -q custom_components/entity_audit
       - name: Validate JavaScript syntax
         run: node --check custom_components/entity_audit/frontend/entity-audit-panel.js
+      - name: Test local QR generator
+        run: node tests/test_qrcode.js
 
   hacs:
     runs-on: ubuntu-latest

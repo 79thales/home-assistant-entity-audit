@@ -18,8 +18,11 @@ class EntityAuditPanel extends HTMLElement {
     this._loading = false;
     this._labelWidth = 60;
     this._labelHeight = 38;
+    this._labelVariant = "text";
     this._filtersOpen = false;
     this._labelPdf = null;
+    this._qrLibraryPromise = null;
+    this._buildingLabels = false;
   }
 
   set hass(value) {
@@ -171,6 +174,78 @@ class EntityAuditPanel extends HTMLElement {
     );
   }
 
+  _isQrLibrary(value) {
+    return typeof value === "function" && Boolean(value.stringToBytesFuncs?.["UTF-8"]);
+  }
+
+  _loadQrLibrary() {
+    if (this._isQrLibrary(window.qrcode)) {
+      window.qrcode.stringToBytes = window.qrcode.stringToBytesFuncs["UTF-8"];
+      return Promise.resolve(window.qrcode);
+    }
+    if (this._qrLibraryPromise) return this._qrLibraryPromise;
+    this._qrLibraryPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "/entity_audit/qrcode.js?v=0.3.11";
+      script.dataset.entityAuditQr = "true";
+      script.addEventListener("load", () => {
+        if (!this._isQrLibrary(window.qrcode)) {
+          reject(new Error("QR library did not initialize"));
+          return;
+        }
+        window.qrcode.stringToBytes = window.qrcode.stringToBytesFuncs["UTF-8"];
+        resolve(window.qrcode);
+      }, { once: true });
+      script.addEventListener("error", () => reject(new Error("QR library could not be loaded")), { once: true });
+      document.head.appendChild(script);
+    }).catch((error) => {
+      this._qrLibraryPromise = null;
+      throw error;
+    });
+    return this._qrLibraryPromise;
+  }
+
+  _labelQrPayload(entity) {
+    return JSON.stringify({
+      name: entity.device_name || entity.name,
+      ip_address: entity.ip_address,
+      mac_address: entity.mac_address || null,
+      manufacturer: entity.manufacturer || null,
+      area: entity.area_name || null,
+    });
+  }
+
+  _drawQr(context, data, x, y, size) {
+    const code = window.qrcode(0, "M");
+    code.addData(data, "Byte");
+    code.make();
+    const moduleCount = code.getModuleCount();
+    const quietZone = 4;
+    const cellSize = Math.max(1, Math.floor(size / (moduleCount + (quietZone * 2))));
+    const qrSize = cellSize * (moduleCount + (quietZone * 2));
+    const left = Math.round(x + ((size - qrSize) / 2));
+    const top = Math.round(y + ((size - qrSize) / 2));
+
+    context.save();
+    context.imageSmoothingEnabled = false;
+    context.fillStyle = "#ffffff";
+    context.fillRect(left, top, qrSize, qrSize);
+    context.fillStyle = "#000000";
+    for (let row = 0; row < moduleCount; row += 1) {
+      for (let column = 0; column < moduleCount; column += 1) {
+        if (code.isDark(row, column)) {
+          context.fillRect(
+            left + ((column + quietZone) * cellSize),
+            top + ((row + quietZone) * cellSize),
+            cellSize,
+            cellSize
+          );
+        }
+      }
+    }
+    context.restore();
+  }
+
   _revokeLabelPdf() {
     if (this._labelPdf?.url) URL.revokeObjectURL(this._labelPdf.url);
     this._labelPdf = null;
@@ -213,7 +288,7 @@ class EntityAuditPanel extends HTMLElement {
     return lines.slice(0, maxLines);
   }
 
-  _drawPdfLabel(context, x, y, width, height, entity) {
+  _drawPdfLabel(context, x, y, width, height, entity, variant) {
     const padding = Math.max(10, Math.round(Math.min(width, height) * 0.06));
     const titleSize = Math.max(14, Math.min(28, Math.round(height * 0.105)));
     const textSize = Math.max(10, Math.min(18, Math.round(height * 0.058)));
@@ -228,9 +303,26 @@ class EntityAuditPanel extends HTMLElement {
     context.strokeStyle = "#111827";
     context.lineWidth = 2;
     context.strokeRect(x + 1, y + 1, width - 2, height - 2);
+    if (variant === "qr") {
+      const qrSize = Math.min(width, height) - (padding * 2);
+      this._drawQr(
+        context,
+        this._labelQrPayload(entity),
+        x + ((width - qrSize) / 2),
+        y + ((height - qrSize) / 2),
+        qrSize
+      );
+      context.restore();
+      return;
+    }
+
+    const combinedQrSize = variant === "text_qr"
+      ? Math.min(height - (padding * 2), Math.round(width * 0.38))
+      : 0;
+    const textWidth = width - (padding * 2) - (combinedQrSize ? combinedQrSize + padding : 0);
     context.fillStyle = "#111827";
     context.font = `700 ${titleSize}px Arial, sans-serif`;
-    const titleLines = this._wrapCanvasText(context, entity.device_name || entity.name, width - (padding * 2), 2);
+    const titleLines = this._wrapCanvasText(context, entity.device_name || entity.name, textWidth, 2);
     let cursor = y + padding + titleSize;
     for (const line of titleLines) {
       context.fillText(line, x + padding, cursor);
@@ -247,11 +339,20 @@ class EntityAuditPanel extends HTMLElement {
     for (const [label, value] of fields) {
       if (cursor > y + height - padding) break;
       context.fillText(
-        this._truncateCanvasText(context, `${label}: ${value}`, width - (padding * 2)),
+        this._truncateCanvasText(context, `${label}: ${value}`, textWidth),
         x + padding,
         cursor
       );
       cursor += lineHeight;
+    }
+    if (combinedQrSize) {
+      this._drawQr(
+        context,
+        this._labelQrPayload(entity),
+        x + width - padding - combinedQrSize,
+        y + ((height - combinedQrSize) / 2),
+        combinedQrSize
+      );
     }
     context.restore();
   }
@@ -285,7 +386,8 @@ class EntityAuditPanel extends HTMLElement {
           margin + (row * (labelHeightPx + gap)),
           labelWidthPx,
           labelHeightPx,
-          entity
+          entity,
+          this._labelVariant
         );
       });
       pages.push(this._dataUrlToBytes(canvas.toDataURL("image/jpeg", 0.92)));
@@ -338,7 +440,7 @@ class EntityAuditPanel extends HTMLElement {
     return new Blob(chunks, { type: "application/pdf" });
   }
 
-  _downloadLabelsPdf(rows) {
+  async _downloadLabelsPdf(rows) {
     const devices = this._labelDevices(rows);
     if (!devices.length) {
       alert(this._t(
@@ -350,14 +452,26 @@ class EntityAuditPanel extends HTMLElement {
 
     const labelWidth = Math.min(190, Math.max(20, Number(this._labelWidth) || 60));
     const labelHeight = Math.min(280, Math.max(20, Number(this._labelHeight) || 38));
-    const blob = this._buildLabelsPdf(devices, labelWidth, labelHeight);
-    this._revokeLabelPdf();
-    this._labelPdf = {
-      blob,
-      filename: `entity-audit-labels-${new Date().toISOString().slice(0, 10)}.pdf`,
-      url: URL.createObjectURL(blob),
-    };
+    this._buildingLabels = true;
     this._render();
+    try {
+      if (this._labelVariant !== "text") await this._loadQrLibrary();
+      const blob = this._buildLabelsPdf(devices, labelWidth, labelHeight);
+      this._revokeLabelPdf();
+      this._labelPdf = {
+        blob,
+        filename: `entity-audit-labels-${new Date().toISOString().slice(0, 10)}.pdf`,
+        url: URL.createObjectURL(blob),
+      };
+    } catch (error) {
+      alert(this._t(
+        "PDF s QR kódy se nepodařilo vytvořit.",
+        "The PDF with QR codes could not be created."
+      ));
+    } finally {
+      this._buildingLabels = false;
+      this._render();
+    }
   }
 
   async _shareLabelPdf() {
@@ -469,7 +583,7 @@ class EntityAuditPanel extends HTMLElement {
         .filter-toggle { white-space:nowrap; }
         .ribbon-controls .filter { min-height:42px; padding:0 11px; border:1px solid var(--divider-color); border-radius:9px; }
         .select-wrap { position:relative; min-width:200px; }
-        .select-wrap select, .filters select { width:100%; min-height:44px; appearance:none; -webkit-appearance:none; border:1px solid var(--divider-color); border-radius:9px; padding:10px 38px 10px 13px; color:var(--primary-text-color); background-color:var(--card-background-color); background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='10' viewBox='0 0 16 10'%3E%3Cpath fill='%238fa4bf' d='m1 1 7 7 7-7' stroke='%238fa4bf' stroke-width='2'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 13px center; }
+        .select-wrap select, .filters select, .label-variant select { width:100%; min-height:44px; appearance:none; -webkit-appearance:none; border:1px solid var(--divider-color); border-radius:9px; padding:10px 38px 10px 13px; color:var(--primary-text-color); background-color:var(--card-background-color); background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='10' viewBox='0 0 16 10'%3E%3Cpath fill='%238fa4bf' d='m1 1 7 7 7-7' stroke='%238fa4bf' stroke-width='2'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 13px center; }
         main { max-width:1400px; margin:auto; padding:20px; }
         .stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
         .stat, .card, .filter-panel, .pdf-ready { background:var(--card-background-color); border-radius:12px; box-shadow:var(--ha-card-box-shadow); padding:16px; }
@@ -483,6 +597,8 @@ class EntityAuditPanel extends HTMLElement {
         input[type="checkbox"] { width:20px; height:20px; accent-color:var(--primary-color); }
         label.label-size { display:flex; align-items:center; gap:5px; white-space:nowrap; }
         .label-size input { width:68px; min-height:44px; border:1px solid var(--divider-color); border-radius:7px; padding:8px; color:var(--primary-text-color); background:var(--primary-background-color); }
+        label.label-variant { display:flex; align-items:center; gap:8px; white-space:nowrap; }
+        .label-variant select { min-width:190px; }
         .pdf-ready { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; border:1px solid var(--primary-color); font-size:15px; font-weight:600; }
         .pdf-ready a { display:inline-flex; align-items:center; min-height:42px; padding:8px 12px; border-radius:9px; color:var(--text-primary-color, white); background:var(--primary-color); text-decoration:none; }
         .pdf-ready button { color:var(--primary-color); border-color:var(--primary-color); background:transparent; }
@@ -522,7 +638,8 @@ class EntityAuditPanel extends HTMLElement {
           .filter-panel:not(.open) { display:none; }
           .toolbar { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:stretch; }
           .toolbar button, .toolbar .label-size { width:100%; }
-          .toolbar .label-size { grid-column:span 2; justify-content:space-between; }
+          .toolbar .label-size, .toolbar .label-variant { grid-column:span 2; justify-content:space-between; }
+          .label-variant select { min-width:0; width:min(230px, 62vw); }
           .filters { grid-template-columns:1fr; }
           .device-filter { min-width:0; max-width:none; }
           th:nth-child(3), td:nth-child(3), th:nth-child(4), td:nth-child(4) { display:none; }
@@ -564,7 +681,12 @@ class EntityAuditPanel extends HTMLElement {
             <button id="bulk-disable">${this._t("Vypnout audit", "Disable audit")}</button>
             <button id="export">${this._t("Export CSV", "Export CSV")}</button>
             <label class="label-size">${this._t("Štítek (mm)", "Label (mm)")} <input id="label-width" type="number" min="20" max="190" step="1" value="${this._labelWidth}" aria-label="${this._t("Šířka štítku v milimetrech", "Label width in millimeters")}"> × <input id="label-height" type="number" min="20" max="280" step="1" value="${this._labelHeight}" aria-label="${this._t("Výška štítku v milimetrech", "Label height in millimeters")}"></label>
-            <button id="download-labels">${this._t("Vytvořit štítky (PDF)", "Create labels (PDF)")}</button>
+            <label class="label-variant">${this._t("Varianta", "Variant")} <select id="label-variant" aria-label="${this._t("Varianta štítku", "Label variant")}">
+              <option value="text" ${this._labelVariant === "text" ? "selected" : ""}>${this._t("Textový štítek", "Text label")}</option>
+              <option value="text_qr" ${this._labelVariant === "text_qr" ? "selected" : ""}>${this._t("Text + QR kód", "Text + QR code")}</option>
+              <option value="qr" ${this._labelVariant === "qr" ? "selected" : ""}>${this._t("Pouze QR kód", "QR code only")}</option>
+            </select></label>
+            <button id="download-labels" ${this._buildingLabels ? "disabled" : ""}>${this._buildingLabels ? this._t("Vytvářím PDF…", "Creating PDF…") : this._t("Vytvořit štítky (PDF)", "Create labels (PDF)")}</button>
           </div>
           <div class="filters">
           <select id="device-filter" class="device-filter" aria-label="${this._t("Filtrovat podle zařízení", "Filter by device")}">
@@ -656,6 +778,7 @@ class EntityAuditPanel extends HTMLElement {
     this.shadowRoot.querySelector("#export")?.addEventListener("click", () => this._exportCsv(rows));
     this.shadowRoot.querySelector("#label-width")?.addEventListener("input", (event) => { this._labelWidth = event.target.value; });
     this.shadowRoot.querySelector("#label-height")?.addEventListener("input", (event) => { this._labelHeight = event.target.value; });
+    this.shadowRoot.querySelector("#label-variant")?.addEventListener("change", (event) => { this._labelVariant = event.target.value; this._revokeLabelPdf(); this._render(); });
     this.shadowRoot.querySelector("#download-labels")?.addEventListener("click", () => this._downloadLabelsPdf(rows));
     this.shadowRoot.querySelector("#share-label-pdf")?.addEventListener("click", () => this._shareLabelPdf());
     this.shadowRoot.querySelector("#discard-label-pdf")?.addEventListener("click", () => { this._revokeLabelPdf(); this._render(); });
@@ -667,6 +790,6 @@ class EntityAuditPanel extends HTMLElement {
   }
 }
 
-if (!customElements.get("entity-audit-panel-v0310")) {
-  customElements.define("entity-audit-panel-v0310", EntityAuditPanel);
+if (!customElements.get("entity-audit-panel-v0311")) {
+  customElements.define("entity-audit-panel-v0311", EntityAuditPanel);
 }

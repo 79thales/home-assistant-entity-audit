@@ -19,6 +19,10 @@ FRONTEND_FILE = (
 )
 MANIFEST_FILE = ROOT / "custom_components" / "entity_audit" / "manifest.json"
 INIT_FILE = ROOT / "custom_components" / "entity_audit" / "__init__.py"
+QR_LIBRARY_FILE = ROOT / "custom_components" / "entity_audit" / "frontend" / "qrcode.js"
+QR_LICENSE_FILE = (
+    ROOT / "custom_components" / "entity_audit" / "frontend" / "QRCODE-LICENSE.txt"
+)
 
 
 class FrontendContractTest(unittest.TestCase):
@@ -54,8 +58,21 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn("manufacturerLabel", frontend)
         self.assertIn('id="label-width"', frontend)
         self.assertIn('id="label-height"', frontend)
+        self.assertIn('id="label-variant"', frontend)
+        self.assertIn('value="text_qr"', frontend)
+        self.assertIn('value="qr"', frontend)
+        self.assertIn("_labelQrPayload", frontend)
         self.assertIn('type: "application/pdf"', frontend)
         self.assertNotIn("window.open(", frontend)
+
+    def test_qr_generator_is_bundled_and_served_locally(self) -> None:
+        constants = CONST_FILE.read_text(encoding="utf-8")
+        registration = INIT_FILE.read_text(encoding="utf-8")
+
+        self.assertIn('QR_LIBRARY_URL = "/entity_audit/qrcode.js"', constants)
+        self.assertIn("StaticPathConfig(\n                    QR_LIBRARY_URL", registration)
+        self.assertTrue(QR_LIBRARY_FILE.is_file())
+        self.assertIn("MIT License", QR_LICENSE_FILE.read_text(encoding="utf-8"))
 
     def test_system_toolbar_keeps_search_and_filters_available(self) -> None:
         frontend = FRONTEND_FILE.read_text(encoding="utf-8")

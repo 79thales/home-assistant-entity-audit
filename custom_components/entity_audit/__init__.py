@@ -18,6 +18,7 @@ from .const import (
     PANEL_ELEMENT,
     PANEL_MODULE_URL,
     PANEL_URL,
+    QR_LIBRARY_URL,
 )
 from .manager import EntityAuditManager
 from .websocket import async_register_websocket_commands
@@ -44,7 +45,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not runtime.get("api_registered"):
         frontend_path = Path(__file__).parent / "frontend"
         await hass.http.async_register_static_paths(
-            [StaticPathConfig(PANEL_URL, str(frontend_path / "entity-audit-panel.js"), False)]
+            [
+                StaticPathConfig(
+                    PANEL_URL, str(frontend_path / "entity-audit-panel.js"), False
+                ),
+                StaticPathConfig(
+                    QR_LIBRARY_URL, str(frontend_path / "qrcode.js"), False
+                ),
+            ]
         )
         async_register_websocket_commands(hass)
         runtime["api_registered"] = True
