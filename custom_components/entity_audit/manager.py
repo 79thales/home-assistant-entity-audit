@@ -13,7 +13,13 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from .const import PROBLEM_STATES, STORAGE_KEY, STORAGE_VERSION
+from .const import (
+    DEFAULT_ACTIVITY_LOG_ENABLED,
+    MAX_ACTIVITY_EVENTS,
+    PROBLEM_STATES,
+    STORAGE_KEY,
+    STORAGE_VERSION,
+)
 from .network import find_ip_address, find_mac_address
 
 
@@ -27,6 +33,8 @@ class EntityAuditManager:
         self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self._enabled: set[str] = set()
         self._history: dict[str, list[dict[str, Any]]] = {}
+        self._activity_enabled = DEFAULT_ACTIVITY_LOG_ENABLED
+        self._activity: list[dict[str, str]] = []
         self._unsub = None
 
     async def async_start(self) -> None:
@@ -34,7 +42,16 @@ class EntityAuditManager:
         data = await self._store.async_load() or {}
         self._enabled = set(data.get("enabled", []))
         self._history = data.get("history", {})
+        self._activity_enabled = bool(
+            data.get("activity_enabled", DEFAULT_ACTIVITY_LOG_ENABLED)
+        )
+        self._activity = [
+            record
+            for record in data.get("activity", [])
+            if isinstance(record, dict)
+        ]
         self._prune_all()
+        self._prune_activity()
         self._unsub = self.hass.bus.async_listen(EVENT_STATE_CHANGED, self._state_changed)
 
     async def async_stop(self) -> None:
@@ -101,6 +118,52 @@ class EntityAuditManager:
         """Delete stored audit records for one entity."""
         self._history.pop(entity_id, None)
         self._store.async_delay_save(self._data, 1)
+
+    @callback
+    def get_activity(self, limit: int) -> dict[str, Any]:
+        """Return newest action and error records with their local settings."""
+        self._prune_activity()
+        return {
+            "enabled": self._activity_enabled,
+            "retention_days": self.retention_days,
+            "count": len(self._activity),
+            "events": list(reversed(self._activity[-limit:])),
+        }
+
+    @callback
+    def set_activity_enabled(self, enabled: bool) -> None:
+        """Enable or disable locally stored panel activity records."""
+        if enabled:
+            self._activity_enabled = True
+            self.log_activity("activity_log_enabled")
+        else:
+            self.log_activity("activity_log_disabled")
+            self._activity_enabled = False
+            self._store.async_delay_save(self._data, 1)
+
+    @callback
+    def clear_activity(self) -> None:
+        """Delete the locally stored action and error records."""
+        self._activity = []
+        self._store.async_delay_save(self._data, 1)
+
+    @callback
+    def log_activity(
+        self, event_type: str, level: str = "info", detail: str | None = None
+    ) -> None:
+        """Store a bounded, non-sensitive panel action or error record."""
+        if not self._activity_enabled:
+            return
+        record: dict[str, str] = {
+            "timestamp": dt_util.utcnow().isoformat(),
+            "type": event_type,
+            "level": level,
+        }
+        if detail:
+            record["detail"] = detail
+        self._activity.append(record)
+        self._prune_activity()
+        self._store.async_delay_save(self._data, 2)
 
     @callback
     def get_history(self, entity_id: str, limit: int) -> list[dict[str, Any]]:
@@ -206,11 +269,26 @@ class EntityAuditManager:
         return sorted(result, key=lambda item: (item["name"].casefold(), item["entity_id"]))
 
     def _data(self) -> dict[str, Any]:
-        return {"enabled": sorted(self._enabled), "history": self._history}
+        return {
+            "enabled": sorted(self._enabled),
+            "history": self._history,
+            "activity_enabled": self._activity_enabled,
+            "activity": self._activity,
+        }
 
     def _prune_all(self) -> None:
         for entity_id in list(self._history):
             self._prune(entity_id)
+
+    def _prune_activity(self) -> None:
+        """Apply the normal audit retention period and a hard activity limit."""
+        cutoff = dt_util.utcnow() - timedelta(days=self.retention_days)
+        kept: list[dict[str, str]] = []
+        for record in self._activity:
+            timestamp = dt_util.parse_datetime(str(record.get("timestamp", "")))
+            if timestamp is not None and timestamp >= cutoff:
+                kept.append(record)
+        self._activity = kept[-MAX_ACTIVITY_EVENTS:]
 
     def _prune(self, entity_id: str) -> None:
         cutoff = dt_util.utcnow() - timedelta(days=self.retention_days)

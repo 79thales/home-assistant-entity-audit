@@ -30,6 +30,8 @@ QR_LICENSE_FILE = (
 QR_READER_LICENSE_FILE = (
     ROOT / "custom_components" / "entity_audit" / "frontend" / "JSQR-LICENSE.txt"
 )
+MANAGER_FILE = ROOT / "custom_components" / "entity_audit" / "manager.py"
+WEBSOCKET_FILE = ROOT / "custom_components" / "entity_audit" / "websocket.py"
 
 
 class FrontendContractTest(unittest.TestCase):
@@ -125,6 +127,26 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn('id="search"', frontend)
         self.assertIn('id="toggle-filters"', frontend)
         self.assertIn(".filter-panel:not(.open)", frontend)
+
+    def test_action_and_error_history_is_local_and_bounded(self) -> None:
+        frontend = FRONTEND_FILE.read_text(encoding="utf-8")
+        manager = MANAGER_FILE.read_text(encoding="utf-8")
+        websocket = WEBSOCKET_FILE.read_text(encoding="utf-8")
+
+        self.assertIn('id="open-activity"', frontend)
+        self.assertIn('id="activity-enabled"', frontend)
+        self.assertIn('id="clear-activity"', frontend)
+        self.assertIn("_recordActivity(\"qr_camera_failed\"", frontend)
+        self.assertIn("MAX_ACTIVITY_EVENTS = 1000", CONST_FILE.read_text(encoding="utf-8"))
+        self.assertIn("ACTIVITY_EVENT_TYPES", CONST_FILE.read_text(encoding="utf-8"))
+        self.assertIn("def _prune_activity", manager)
+        self.assertIn('"retention_days": self.retention_days', manager)
+        self.assertIn("entity_audit/get_activity", frontend)
+        self.assertIn("entity_audit/set_activity_enabled", frontend)
+        self.assertIn("entity_audit/clear_activity", frontend)
+        self.assertIn('f"{DOMAIN}/get_activity"', websocket)
+        self.assertIn("vol.In(ACTIVITY_EVENT_TYPES)", websocket)
+        self.assertIn("@websocket_api.require_admin", websocket)
 
     def test_panel_runs_in_home_assistant_dom_for_system_toolbar(self) -> None:
         registration = INIT_FILE.read_text(encoding="utf-8")

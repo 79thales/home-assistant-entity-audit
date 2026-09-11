@@ -7,7 +7,7 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
+from .const import ACTIVITY_EVENT_TYPES, DOMAIN
 from .manager import EntityAuditManager
 
 
@@ -18,6 +18,10 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_set_logging)
     websocket_api.async_register_command(hass, ws_set_logging_bulk)
     websocket_api.async_register_command(hass, ws_clear_history)
+    websocket_api.async_register_command(hass, ws_get_activity)
+    websocket_api.async_register_command(hass, ws_log_activity)
+    websocket_api.async_register_command(hass, ws_set_activity_enabled)
+    websocket_api.async_register_command(hass, ws_clear_activity)
 
 
 def _manager(hass: HomeAssistant) -> EntityAuditManager:
@@ -92,3 +96,59 @@ async def ws_clear_history(hass, connection, msg) -> None:
     """Clear an entity's records."""
     _manager(hass).clear_history(msg["entity_id"])
     connection.send_result(msg["id"], {"success": True})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/get_activity",
+        vol.Optional("limit", default=200): vol.All(int, vol.Range(min=1, max=1000)),
+    }
+)
+@websocket_api.async_response
+async def ws_get_activity(hass, connection, msg) -> None:
+    """Return the local panel action and error log."""
+    connection.send_result(msg["id"], _manager(hass).get_activity(msg["limit"]))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/log_activity",
+        vol.Required("event_type"): vol.In(ACTIVITY_EVENT_TYPES),
+        vol.Optional("level", default="info"): vol.In(["info", "error"]),
+        vol.Optional("detail"): vol.All(str, vol.Length(min=1, max=240)),
+    }
+)
+@websocket_api.async_response
+async def ws_log_activity(hass, connection, msg) -> None:
+    """Append one non-sensitive panel activity record."""
+    _manager(hass).log_activity(
+        msg["event_type"], msg["level"], msg.get("detail")
+    )
+    connection.send_result(msg["id"], {"success": True})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/set_activity_enabled",
+        vol.Required("enabled"): bool,
+    }
+)
+@websocket_api.async_response
+async def ws_set_activity_enabled(hass, connection, msg) -> None:
+    """Enable or disable local panel activity logging."""
+    manager = _manager(hass)
+    manager.set_activity_enabled(msg["enabled"])
+    connection.send_result(msg["id"], manager.get_activity(1))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/clear_activity"})
+@websocket_api.async_response
+async def ws_clear_activity(hass, connection, msg) -> None:
+    """Clear the local panel action and error log."""
+    manager = _manager(hass)
+    manager.clear_activity()
+    connection.send_result(msg["id"], manager.get_activity(1))

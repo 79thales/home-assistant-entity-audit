@@ -126,14 +126,14 @@ for (const invalidPayload of ["not-json", "{}", '{"name":"Only a name"}']) {
 panel._scannerOpen = true;
 panel._scanResult = { ...parsed, name: "<script>alert(1)</script>" };
 panel._scanMatchedDevice = { device_id: "device-1" };
-panel._render();
-if (!panel.shadowRoot.innerHTML.includes("&lt;script&gt;alert(1)&lt;/script&gt;")) {
+const virtualLabelHtml = panel._scannerDialogContent();
+if (!virtualLabelHtml.includes("&lt;script&gt;alert(1)&lt;/script&gt;")) {
   throw new Error("Virtual label did not escape scanned text");
 }
-if (panel.shadowRoot.innerHTML.includes("<script>alert(1)</script>")) {
+if (virtualLabelHtml.includes("<script>alert(1)</script>")) {
   throw new Error("Virtual label rendered untrusted QR content as markup");
 }
-if (!panel.shadowRoot.innerHTML.includes('href="/config/devices/device/device-1"')) {
+if (!virtualLabelHtml.includes('href="/config/devices/device/device-1"')) {
   throw new Error("Matched virtual label does not link to the Home Assistant device page");
 }
 
@@ -141,6 +141,7 @@ async function testCameraRequestUsesTheOriginalTap() {
   const originalNavigator = Object.getOwnPropertyDescriptor(global, "navigator");
   const originalSecureContext = global.isSecureContext;
   let rendered = false;
+  let fullRenders = 0;
   let cameraRequests = 0;
   const stream = { getTracks: () => [] };
   Object.defineProperty(global, "navigator", {
@@ -158,12 +159,24 @@ async function testCameraRequestUsesTheOriginalTap() {
   global.isSecureContext = true;
   global.window.jsQR = jsQR;
   const scanner = new global.EntityAuditPanel();
-  scanner._render = () => { rendered = true; };
+  scanner._render = () => { fullRenders += 1; };
+  scanner._renderScannerDialog = () => { rendered = true; };
+  const activityMessages = [];
+  scanner._hass = {
+    callWS(message) {
+      activityMessages.push(message);
+      return Promise.resolve({ success: true });
+    },
+  };
 
   try {
     await scanner._startScanner();
     if (cameraRequests !== 1) throw new Error("Camera was not requested exactly once");
     if (scanner._scannerStream !== stream) throw new Error("Camera stream was not retained");
+    if (fullRenders !== 0) throw new Error("Opening the scanner rebuilt the entity inventory");
+    if (!activityMessages.some((message) => message.event_type === "qr_camera_requested")) {
+      throw new Error("Camera request was not written to the local action log");
+    }
   } finally {
     if (originalNavigator) Object.defineProperty(global, "navigator", originalNavigator);
     else delete global.navigator;

@@ -25,6 +25,7 @@ class EntityAuditPanel extends HTMLElement {
     this._qrReaderLibraryPromise = null;
     this._buildingLabels = false;
     this._scannerOpen = false;
+    this._scannerDialog = null;
     this._scannerStream = null;
     this._scannerFrame = null;
     this._scannerCanvas = null;
@@ -35,6 +36,13 @@ class EntityAuditPanel extends HTMLElement {
     this._scanMatchedDevice = null;
     this._scanningImage = false;
     this._lastScanTime = 0;
+    this._activityLogOpen = false;
+    this._activityLoading = false;
+    this._activityEnabled = true;
+    this._activity = [];
+    this._activityCount = 0;
+    this._activityRetentionDays = null;
+    this._activityError = null;
   }
 
   set hass(value) {
@@ -71,6 +79,7 @@ class EntityAuditPanel extends HTMLElement {
     this._render();
     try {
       this._entities = await this._hass.callWS({ type: "entity_audit/list_entities" });
+      this._loadActivity(false);
       if (this._selected) {
         this._selected = this._entities.find((e) => e.entity_id === this._selected.entity_id) || null;
       }
@@ -89,6 +98,11 @@ class EntityAuditPanel extends HTMLElement {
       enabled,
     });
     entity.logging = enabled;
+    this._recordActivity(
+      enabled ? "entity_audit_enabled" : "entity_audit_disabled",
+      "info",
+      entity.entity_id
+    );
     this._render();
   }
 
@@ -105,6 +119,11 @@ class EntityAuditPanel extends HTMLElement {
       enabled,
     });
     rows.forEach((entity) => { entity.logging = enabled; });
+    this._recordActivity(
+      enabled ? "entity_audit_bulk_enabled" : "entity_audit_bulk_disabled",
+      "info",
+      String(rows.length)
+    );
     this._render();
   }
 
@@ -115,6 +134,7 @@ class EntityAuditPanel extends HTMLElement {
       entity_id: entity.entity_id,
       limit: 500,
     });
+    this._recordActivity("entity_history_opened", "info", entity.entity_id);
     this._render();
   }
 
@@ -126,10 +146,12 @@ class EntityAuditPanel extends HTMLElement {
     });
     this._history = [];
     this._selected.event_count = 0;
+    this._recordActivity("entity_history_cleared", "info", this._selected.entity_id);
     this._render();
   }
 
   _showEntity(entityId) {
+    this._recordActivity("entity_detail_opened", "info", entityId);
     this.dispatchEvent(new CustomEvent("hass-more-info", {
       detail: { entityId },
       bubbles: true,
@@ -171,6 +193,107 @@ class EntityAuditPanel extends HTMLElement {
     anchor.download = `entity-audit-${new Date().toISOString().slice(0, 10)}.csv`;
     anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 0);
+    this._recordActivity("csv_exported", "info", String(rows.length));
+  }
+
+  _recordActivity(eventType, level = "info", detail = null) {
+    if (!this._hass || !this._activityEnabled) return;
+    const payload = { type: "entity_audit/log_activity", event_type: eventType, level };
+    if (detail) payload.detail = String(detail).slice(0, 240);
+    this._hass.callWS(payload).then(() => {
+      this._activityCount += 1;
+    }).catch(() => undefined);
+  }
+
+  async _loadActivity(render = true) {
+    if (!this._hass || this._activityLoading) return;
+    this._activityLoading = true;
+    this._activityError = null;
+    if (render) this._render();
+    try {
+      const result = await this._hass.callWS({
+        type: "entity_audit/get_activity",
+        limit: 500,
+      });
+      this._activityEnabled = result.enabled;
+      this._activity = result.events || [];
+      this._activityCount = result.count || 0;
+      this._activityRetentionDays = result.retention_days;
+    } catch (error) {
+      this._activityError = error.message || String(error);
+    } finally {
+      this._activityLoading = false;
+      if (render || this._activityLogOpen) this._render();
+    }
+  }
+
+  async _openActivityLog() {
+    this._activityLogOpen = true;
+    await this._loadActivity();
+  }
+
+  async _setActivityEnabled(enabled) {
+    const previous = this._activityEnabled;
+    this._activityEnabled = enabled;
+    this._render();
+    try {
+      const result = await this._hass.callWS({
+        type: "entity_audit/set_activity_enabled",
+        enabled,
+      });
+      this._activityEnabled = result.enabled;
+      this._activity = result.events || this._activity;
+      this._activityCount = result.count ?? this._activityCount;
+      this._activityRetentionDays = result.retention_days ?? this._activityRetentionDays;
+    } catch (error) {
+      this._activityEnabled = previous;
+      this._activityError = error.message || String(error);
+    }
+    this._render();
+  }
+
+  async _clearActivity() {
+    if (!confirm(this._t(
+      "Opravdu smazat historii akcí a chyb?",
+      "Delete the action and error history?"
+    ))) return;
+    const result = await this._hass.callWS({ type: "entity_audit/clear_activity" });
+    this._activity = result.events || [];
+    this._activityCount = result.count || 0;
+    this._render();
+  }
+
+  _activityText(event) {
+    const labels = {
+      activity_log_enabled: this._t("Záznam akcí a chyb byl zapnut", "Action and error logging was enabled"),
+      activity_log_disabled: this._t("Záznam akcí a chyb byl vypnut", "Action and error logging was disabled"),
+      entity_audit_enabled: this._t("Audit entity zapnut", "Entity auditing enabled"),
+      entity_audit_disabled: this._t("Audit entity vypnut", "Entity auditing disabled"),
+      entity_audit_bulk_enabled: this._t("Audit zobrazených entit zapnut", "Displayed entity auditing enabled"),
+      entity_audit_bulk_disabled: this._t("Audit zobrazených entit vypnut", "Displayed entity auditing disabled"),
+      entity_history_opened: this._t("Otevřena historie entity", "Entity history opened"),
+      entity_history_cleared: this._t("Historie entity smazána", "Entity history cleared"),
+      entity_detail_opened: this._t("Otevřen detail entity", "Entity detail opened"),
+      csv_exported: this._t("Exportován seznam entit do CSV", "Entity list exported to CSV"),
+      labels_pdf_created: this._t("Vytvořeno PDF štítků", "Label PDF created"),
+      labels_pdf_shared: this._t("Sdíleno PDF štítků", "Label PDF shared"),
+      labels_pdf_failed: this._t("Vytvoření PDF štítků selhalo", "Label PDF creation failed"),
+      labels_pdf_share_failed: this._t("Sdílení PDF štítků selhalo", "Label PDF sharing failed"),
+      qr_scanner_opened: this._t("Otevřena čtečka QR štítků", "QR label scanner opened"),
+      qr_camera_requested: this._t("Vyžádán přístup ke kameře", "Camera access requested"),
+      qr_camera_started: this._t("Kamera QR čtečky spuštěna", "QR scanner camera started"),
+      qr_camera_failed: this._t("Kamera QR čtečky selhala", "QR scanner camera failed"),
+      qr_reader_failed: this._t("Načtení QR čtečky selhalo", "QR reader loading failed"),
+      qr_label_scanned: this._t("Načten QR štítek", "QR label scanned"),
+      qr_label_rejected: this._t("Odmítnut neplatný QR kód", "Invalid QR code rejected"),
+      qr_photo_requested: this._t("Vybrána fotografie QR kódu", "QR-code photo selected"),
+      qr_photo_failed: this._t("Načtení fotografie QR kódu selhalo", "QR-code photo scanning failed"),
+      scanned_device_filtered: this._t("Zobrazeny entity načteného zařízení", "Scanned device entities displayed"),
+      scanned_device_page_opened: this._t("Otevřena stránka načteného zařízení", "Scanned device page opened"),
+      inventory_refreshed: this._t("Obnoven inventář entit", "Entity inventory refreshed"),
+    };
+    const text = labels[event.type] || event.type;
+    return event.detail ? `${text} · ${event.detail}` : text;
   }
 
   _labelDevices(rows) {
@@ -305,13 +428,20 @@ class EntityAuditPanel extends HTMLElement {
       this._scannerError = null;
       this._stopScannerCamera();
       navigator.vibrate?.(80);
-      this._render();
+      this._recordActivity(
+        "qr_label_scanned",
+        "info",
+        this._scanMatchedDevice ? "matched" : "not_matched"
+      );
+      this._renderScannerDialog();
       return true;
     } catch (_error) {
       this._scannerError = this._t(
         "Tento QR kód není štítek vytvořený aplikací Entity Audit.",
         "This QR code is not a label created by Entity Audit."
       );
+      this._recordActivity("qr_label_rejected", "error");
+      this._renderScannerDialog();
       return false;
     }
   }
@@ -354,13 +484,14 @@ class EntityAuditPanel extends HTMLElement {
     video.srcObject = this._scannerStream;
     video.play().then(() => {
       this._scannerFrame = requestAnimationFrame((timestamp) => this._scanCameraFrame(timestamp));
-    }).catch(() => {
+    }).catch((error) => {
       this._stopScannerCamera();
       this._scannerError = this._t(
         "Náhled kamery se nepodařilo spustit. Použijte fotografii.",
         "The camera preview could not start. Use a photo instead."
       );
-      this._render();
+      this._recordActivity("qr_camera_failed", "error", error?.name || "preview_failed");
+      this._renderScannerDialog();
     });
   }
 
@@ -395,6 +526,54 @@ class EntityAuditPanel extends HTMLElement {
     );
   }
 
+  _scannerDialogContent() {
+    return `<div class="dialog-head"><div><h2>${this._t("Čtečka QR štítků", "QR label scanner")}</h2><div class="entity-id">${this._t("Naskenujte štítek vytvořený aplikací Entity Audit", "Scan a label created by Entity Audit")}</div></div><button id="close-scanner" aria-label="${this._t("Zavřít čtečku", "Close scanner")}">✕</button></div>
+      <div class="scanner-body">
+        ${this._scanResult ? `<section class="virtual-label">
+          <h3>${this._escape(this._scanResult.name)}</h3>
+          <dl class="label-detail">
+            <dt>${this._t("IP adresa", "IP address")}</dt><dd>${this._escape(this._scanResult.ip_address || "—")}</dd>
+            <dt>${this._t("MAC adresa", "MAC address")}</dt><dd>${this._escape(this._scanResult.mac_address || "—")}</dd>
+            <dt>${this._t("Výrobce", "Manufacturer")}</dt><dd>${this._escape(this._scanResult.manufacturer || "—")}</dd>
+            <dt>${this._t("Umístění", "Area")}</dt><dd>${this._escape(this._scanResult.area || "—")}</dd>
+          </dl>
+        </section>
+        <div class="${this._scanMatchedDevice ? "match-ok" : "match-missing"}">${this._scanMatchedDevice
+          ? this._t("Zařízení bylo nalezeno v aktuálním inventáři.", "The device was found in the current inventory.")
+          : this._t("Zařízení se v aktuálním inventáři nepodařilo jednoznačně najít.", "The device could not be uniquely matched in the current inventory.")}</div>
+        <div class="scanner-actions">
+          ${this._scanMatchedDevice ? `<button id="filter-scanned-device">${this._t("Zobrazit jeho entity", "Show its entities")}</button><a id="open-scanned-device" class="primary-link" href="/config/devices/device/${this._escape(this._scanMatchedDevice.device_id)}">${this._t("Otevřít stránku zařízení", "Open device page")}</a>` : ""}
+          <button id="scan-again">${this._t("Skenovat znovu", "Scan again")}</button>
+        </div>` : `<div class="camera-stage"><video id="scanner-video" muted playsinline></video><div class="camera-guide"></div><div class="camera-hint">${this._scannerStarting ? this._t("Čekám na povolení kamery…", "Waiting for camera permission…") : this._t("Umístěte QR kód doprostřed rámečku", "Place the QR code inside the frame")}</div></div>`}
+        ${this._scannerError ? `<div class="scanner-error">${this._escape(this._scannerError)}</div>` : ""}
+        ${!window.isSecureContext ? `<div class="scanner-note">${this._t("Pro spolehlivou živou kameru na iPhonu otevřete Home Assistant přes HTTPS. QR kód lze také načíst z fotografie.", "For reliable live camera scanning on iPhone, open Home Assistant over HTTPS. You can also scan a QR-code photo.")}</div>` : ""}
+        ${!this._scanResult ? `<div class="scanner-actions"><label class="file-button">${this._scanningImage ? this._t("Zpracovávám obrázek…", "Processing image…") : this._t("Vyfotit QR kód", "Take a QR-code photo")}<input id="scan-camera-image" type="file" accept="image/*" capture="environment" ${this._scanningImage ? "disabled" : ""}></label><label class="file-button">${this._t("Vybrat obrázek", "Select an image")}<input id="scan-image" type="file" accept="image/*" ${this._scanningImage ? "disabled" : ""}></label></div>` : ""}
+      </div>`;
+  }
+
+  _renderScannerDialog() {
+    if (!this._scannerOpen) return;
+    if (!this._scannerDialog || !this._scannerDialog.isConnected) {
+      this._scannerDialog = document.createElement("dialog");
+      this._scannerDialog.className = "scanner-dialog";
+      this.shadowRoot.appendChild(this._scannerDialog);
+    }
+    this._scannerDialog.innerHTML = this._scannerDialogContent();
+    this._scannerDialog.setAttribute("open", "");
+    this._scannerDialog.querySelector("#close-scanner")?.addEventListener("click", () => this._closeScanner());
+    this._scannerDialog.querySelector("#scan-again")?.addEventListener("click", () => this._startScanner());
+    this._scannerDialog.querySelector("#filter-scanned-device")?.addEventListener("click", () => this._filterToScannedDevice());
+    this._scannerDialog.querySelector("#open-scanned-device")?.addEventListener("click", () => this._recordActivity("scanned_device_page_opened", "info", this._scanMatchedDevice?.device_id));
+    this._scannerDialog.querySelector("#scan-camera-image")?.addEventListener("change", (event) => this._scanImageFile(event.target.files?.[0]));
+    this._scannerDialog.querySelector("#scan-image")?.addEventListener("change", (event) => this._scanImageFile(event.target.files?.[0]));
+    if (this._scannerStream && !this._scanResult && !this._scanningImage) this._attachScannerStream();
+  }
+
+  _removeScannerDialog() {
+    this._scannerDialog?.remove();
+    this._scannerDialog = null;
+  }
+
   async _startScanner() {
     this._stopScannerCamera();
     this._scannerOpen = true;
@@ -417,10 +596,12 @@ class EntityAuditPanel extends HTMLElement {
         cameraRequest = Promise.reject(error);
       }
     }
+    this._recordActivity("qr_scanner_opened");
+    if (cameraRequest) this._recordActivity("qr_camera_requested");
     const readerRequest = this._loadQrReaderLibrary();
-    this._render();
+    this._renderScannerDialog();
 
-    readerRequest.catch(() => {
+    readerRequest.catch((error) => {
       if (!this._scannerOpen) return;
       this._scannerReaderFailed = true;
       this._scannerStarting = false;
@@ -429,13 +610,15 @@ class EntityAuditPanel extends HTMLElement {
         "Čtečku QR kódů se nepodařilo načíst. Použijte aktualizovaný panel a zkuste to znovu.",
         "The QR reader could not be loaded. Reload the updated panel and try again."
       );
-      this._render();
+      this._recordActivity("qr_reader_failed", "error", error?.name || "load_failed");
+      this._renderScannerDialog();
     });
 
     if (!cameraRequest) {
       this._scannerStarting = false;
       this._scannerError = this._cameraAccessMessage();
-      this._render();
+      this._recordActivity("qr_camera_failed", "error", "media_devices_unavailable");
+      this._renderScannerDialog();
       return;
     }
 
@@ -451,13 +634,14 @@ class EntityAuditPanel extends HTMLElement {
       }
       this._scannerStream = stream;
       this._scannerStarting = false;
-      this._render();
-      this._attachScannerStream();
+      this._recordActivity("qr_camera_started");
+      this._renderScannerDialog();
     } catch (error) {
       if (!this._scannerOpen || this._scannerReaderFailed) return;
       this._scannerStarting = false;
       this._scannerError = this._cameraAccessMessage(error);
-      this._render();
+      this._recordActivity("qr_camera_failed", "error", error?.name || "unknown_error");
+      this._renderScannerDialog();
     }
   }
 
@@ -478,24 +662,26 @@ class EntityAuditPanel extends HTMLElement {
     this._scannerReaderFailed = false;
     this._scanResult = null;
     this._scanMatchedDevice = null;
+    this._removeScannerDialog();
     this._render();
   }
 
   async _scanImageFile(file) {
     if (!file) return;
+    this._recordActivity("qr_photo_requested");
     if ((file.type && !file.type.startsWith("image/")) || file.size > 20_000_000) {
       this._scannerError = this._t(
         "Vyberte obrázek QR kódu o velikosti nejvýše 20 MB.",
         "Select a QR-code image no larger than 20 MB."
       );
-      this._render();
+      this._renderScannerDialog();
       return;
     }
     this._scanningImage = true;
     this._scannerError = null;
     if (this._scannerFrame != null) cancelAnimationFrame(this._scannerFrame);
     this._scannerFrame = null;
-    this._render();
+    this._renderScannerDialog();
     try {
       await this._loadQrReaderLibrary();
       const dataUrl = await new Promise((resolve, reject) => {
@@ -521,23 +707,25 @@ class EntityAuditPanel extends HTMLElement {
           "Na obrázku nebyl nalezen čitelný QR kód.",
           "No readable QR code was found in the image."
         );
+        this._recordActivity("qr_photo_failed", "error", "no_code_found");
       } else {
         this._acceptScannedQr(code.data);
       }
-    } catch (_error) {
+    } catch (error) {
       this._scannerError = this._t(
         "Obrázek se nepodařilo načíst nebo zpracovat.",
         "The image could not be loaded or processed."
       );
+      this._recordActivity("qr_photo_failed", "error", error?.name || "processing_failed");
     } finally {
       this._scanningImage = false;
-      this._render();
-      if (this._scannerStream && !this._scanResult) this._attachScannerStream();
+      this._renderScannerDialog();
     }
   }
 
   _filterToScannedDevice() {
     if (!this._scanMatchedDevice) return;
+    this._recordActivity("scanned_device_filtered", "info", this._scanMatchedDevice.device_id);
     this._device = this._scanMatchedDevice.device_id;
     this._filter = "";
     this._manufacturer = "";
@@ -800,11 +988,13 @@ class EntityAuditPanel extends HTMLElement {
         filename: `entity-audit-labels-${new Date().toISOString().slice(0, 10)}.pdf`,
         url: URL.createObjectURL(blob),
       };
+      this._recordActivity("labels_pdf_created", "info", String(devices.length));
     } catch (error) {
       alert(this._t(
         "PDF s QR kódy se nepodařilo vytvořit.",
         "The PDF with QR codes could not be created."
       ));
+      this._recordActivity("labels_pdf_failed", "error", error?.name || "build_failed");
     } finally {
       this._buildingLabels = false;
       this._render();
@@ -820,8 +1010,12 @@ class EntityAuditPanel extends HTMLElement {
         files: [file],
         title: this._t("Štítky zařízení", "Device labels"),
       });
+      this._recordActivity("labels_pdf_shared");
     } catch (error) {
-      if (error?.name !== "AbortError") alert(this._t("PDF se nepodařilo otevřít pro sdílení.", "The PDF could not be opened for sharing."));
+      if (error?.name !== "AbortError") {
+        this._recordActivity("labels_pdf_share_failed", "error", error?.name || "share_failed");
+        alert(this._t("PDF se nepodařilo otevřít pro sdílení.", "The PDF could not be opened for sharing."));
+      }
     }
   }
 
@@ -963,6 +1157,16 @@ class EntityAuditPanel extends HTMLElement {
         .history { display:grid; grid-template-columns:170px 100px 1fr; gap:10px; padding:10px 0; border-bottom:1px solid var(--divider-color); font-size:13px; }
         .event-problem { color:var(--error-color); font-weight:600; }
         .event-recovered { color:var(--success-color); font-weight:600; }
+        .activity-dialog { width:min(760px, calc(100vw - 20px)); }
+        .activity-controls { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 18px; border-bottom:1px solid var(--divider-color); }
+        .activity-controls .filter { margin:0; }
+        .activity-summary { color:var(--secondary-text-color); font-size:13px; }
+        .activity-entry { display:grid; grid-template-columns:150px auto minmax(0, 1fr); gap:10px; align-items:start; padding:11px 0; border-bottom:1px solid var(--divider-color); }
+        .activity-entry:last-child { border-bottom:0; }
+        .activity-entry.error { color:var(--error-color); }
+        .activity-level { display:inline-flex; width:max-content; padding:2px 7px; border-radius:999px; color:var(--secondary-text-color); background:var(--secondary-background-color); font-size:12px; font-weight:600; }
+        .activity-entry.error .activity-level { color:var(--error-color); }
+        .activity-detail { overflow-wrap:anywhere; }
         .scanner-dialog { width:min(560px, calc(100vw - 20px)); }
         .scanner-body { padding:18px; display:grid; gap:14px; }
         .camera-stage { position:relative; min-height:260px; overflow:hidden; border-radius:12px; color:white; background:#111; }
@@ -1007,10 +1211,14 @@ class EntityAuditPanel extends HTMLElement {
           .label-detail { grid-template-columns:1fr; gap:3px; }
           .label-detail dd { margin-bottom:7px; }
           .scanner-actions > * { flex:1 1 auto; }
+          .activity-controls { align-items:flex-start; flex-direction:column; }
+          .activity-entry { grid-template-columns:1fr auto; gap:5px 10px; }
+          .activity-detail { grid-column:1 / -1; }
         }
       </style>
       <ha-top-app-bar-fixed ${this._narrow ? "narrow" : ""}>
         <span slot="title" class="system-title">${this._t("Audit entit", "Entity Audit")}</span>
+        <button slot="actionItems" id="open-activity" class="system-action" title="${this._t("Historie akcí a chyb", "Action and error history")}" aria-label="${this._t("Historie akcí a chyb", "Action and error history")}"><ha-icon icon="mdi:history"></ha-icon></button>
         <button slot="actionItems" id="open-scanner" class="system-action" title="${this._t("Načíst QR štítek", "Scan QR label")}" aria-label="${this._t("Načíst QR štítek", "Scan QR label")}"><ha-icon icon="mdi:qrcode-scan"></ha-icon></button>
         <button slot="actionItems" id="refresh" class="system-action" title="${this._t("Obnovit seznam entit", "Refresh entity list")}" aria-label="${this._t("Obnovit seznam entit", "Refresh entity list")}">${this._loading ? "…" : "↻"}</button>
         <div slot="subRow" class="system-sub-row">
@@ -1111,35 +1319,23 @@ class EntityAuditPanel extends HTMLElement {
           ${this._history.map((event) => `<div class="history"><span>${this._escape(new Date(event.timestamp).toLocaleString())}</span><span class="event-${this._escape(event.type)}">${this._escape(event.type)}</span><span>${this._escape(event.old_state ?? "—")} → ${this._escape(event.new_state ?? "—")}</span></div>`).join("") || `<div class="empty">${this._t("Zatím bez záznamů", "No records yet")}</div>`}
         </div>
       </dialog>` : ""}
-      ${this._scannerOpen ? `<dialog class="scanner-dialog" open>
-        <div class="dialog-head"><div><h2>${this._t("Čtečka QR štítků", "QR label scanner")}</h2><div class="entity-id">${this._t("Naskenujte štítek vytvořený aplikací Entity Audit", "Scan a label created by Entity Audit")}</div></div><button id="close-scanner" aria-label="${this._t("Zavřít čtečku", "Close scanner")}">✕</button></div>
-        <div class="scanner-body">
-          ${this._scanResult ? `<section class="virtual-label">
-            <h3>${this._escape(this._scanResult.name)}</h3>
-            <dl class="label-detail">
-              <dt>${this._t("IP adresa", "IP address")}</dt><dd>${this._escape(this._scanResult.ip_address || "—")}</dd>
-              <dt>${this._t("MAC adresa", "MAC address")}</dt><dd>${this._escape(this._scanResult.mac_address || "—")}</dd>
-              <dt>${this._t("Výrobce", "Manufacturer")}</dt><dd>${this._escape(this._scanResult.manufacturer || "—")}</dd>
-              <dt>${this._t("Umístění", "Area")}</dt><dd>${this._escape(this._scanResult.area || "—")}</dd>
-            </dl>
-          </section>
-          <div class="${this._scanMatchedDevice ? "match-ok" : "match-missing"}">${this._scanMatchedDevice
-            ? this._t("Zařízení bylo nalezeno v aktuálním inventáři.", "The device was found in the current inventory.")
-            : this._t("Zařízení se v aktuálním inventáři nepodařilo jednoznačně najít.", "The device could not be uniquely matched in the current inventory.")}</div>
-          <div class="scanner-actions">
-            ${this._scanMatchedDevice ? `<button id="filter-scanned-device">${this._t("Zobrazit jeho entity", "Show its entities")}</button><a class="primary-link" href="/config/devices/device/${this._escape(this._scanMatchedDevice.device_id)}">${this._t("Otevřít stránku zařízení", "Open device page")}</a>` : ""}
-            <button id="scan-again">${this._t("Skenovat znovu", "Scan again")}</button>
-          </div>` : `<div class="camera-stage"><video id="scanner-video" muted playsinline></video><div class="camera-guide"></div><div class="camera-hint">${this._scannerStarting ? this._t("Čekám na povolení kamery…", "Waiting for camera permission…") : this._t("Umístěte QR kód doprostřed rámečku", "Place the QR code inside the frame")}</div></div>`}
-          ${this._scannerError ? `<div class="scanner-error">${this._escape(this._scannerError)}</div>` : ""}
-          ${!window.isSecureContext ? `<div class="scanner-note">${this._t("Pro spolehlivou živou kameru na iPhonu otevřete Home Assistant přes HTTPS. QR kód lze také načíst z fotografie.", "For reliable live camera scanning on iPhone, open Home Assistant over HTTPS. You can also scan a QR-code photo.")}</div>` : ""}
-          ${!this._scanResult ? `<div class="scanner-actions"><label class="file-button">${this._scanningImage ? this._t("Zpracovávám obrázek…", "Processing image…") : this._t("Vyfotit QR kód", "Take a QR-code photo")}<input id="scan-camera-image" type="file" accept="image/*" capture="environment" ${this._scanningImage ? "disabled" : ""}></label><label class="file-button">${this._t("Vybrat obrázek", "Select an image")}<input id="scan-image" type="file" accept="image/*" ${this._scanningImage ? "disabled" : ""}></label></div>` : ""}
+      ${this._activityLogOpen ? `<dialog class="activity-dialog" open>
+        <div class="dialog-head"><div><h2>${this._t("Historie akcí a chyb", "Action and error history")}</h2><div class="entity-id">${this._t("Uloženo pouze lokálně", "Stored locally only")}</div></div><button id="clear-activity" ${this._activity.length ? "" : "disabled"}>${this._t("Vymazat", "Clear")}</button><button id="close-activity" aria-label="${this._t("Zavřít historii akcí", "Close action history")}">✕</button></div>
+        <div class="activity-controls">
+          <label class="filter"><input id="activity-enabled" type="checkbox" ${this._activityEnabled ? "checked" : ""}> ${this._t("Zaznamenávat akce a chyby", "Record actions and errors")}</label>
+          <span class="activity-summary">${this._t("Automatická retence", "Automatic retention")}: ${this._activityRetentionDays ?? "—"} ${this._t("dní", "days")} · ${this._activityCount} ${this._t("záznamů", "records")}</span>
+        </div>
+        <div class="dialog-body">
+          ${this._activityError ? `<div class="scanner-error">${this._escape(this._activityError)}</div>` : ""}
+          ${this._activityLoading ? `<div class="empty">${this._t("Načítám…", "Loading…")}</div>` : this._activity.map((event) => `<div class="activity-entry ${event.level === "error" ? "error" : ""}"><span>${this._escape(new Date(event.timestamp).toLocaleString())}</span><span class="activity-level">${this._escape(event.level === "error" ? this._t("chyba", "error") : this._t("akce", "action"))}</span><span class="activity-detail">${this._escape(this._activityText(event))}</span></div>`).join("") || `<div class="empty">${this._t("Zatím bez záznamů", "No records yet")}</div>`}
         </div>
       </dialog>` : ""}
       </ha-top-app-bar-fixed>
     `;
 
+    this.shadowRoot.querySelector("#open-activity")?.addEventListener("click", () => this._openActivityLog());
     this.shadowRoot.querySelector("#open-scanner")?.addEventListener("click", () => this._startScanner());
-    this.shadowRoot.querySelector("#refresh")?.addEventListener("click", () => this._load());
+    this.shadowRoot.querySelector("#refresh")?.addEventListener("click", () => { this._recordActivity("inventory_refreshed"); this._load(); });
     this.shadowRoot.querySelector("#toggle-filters")?.addEventListener("click", () => {
       this._filtersOpen = !this._filtersOpen;
       this._render();
@@ -1174,14 +1370,13 @@ class EntityAuditPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll(".state-button").forEach((button) => button.addEventListener("click", () => this._showEntity(rows[Number(button.dataset.index)].entity_id)));
     this.shadowRoot.querySelector("#close")?.addEventListener("click", () => { this._selected = null; this._render(); });
     this.shadowRoot.querySelector("#clear")?.addEventListener("click", () => this._clear());
-    this.shadowRoot.querySelector("#close-scanner")?.addEventListener("click", () => this._closeScanner());
-    this.shadowRoot.querySelector("#scan-again")?.addEventListener("click", () => this._startScanner());
-    this.shadowRoot.querySelector("#filter-scanned-device")?.addEventListener("click", () => this._filterToScannedDevice());
-    this.shadowRoot.querySelector("#scan-camera-image")?.addEventListener("change", (event) => this._scanImageFile(event.target.files?.[0]));
-    this.shadowRoot.querySelector("#scan-image")?.addEventListener("change", (event) => this._scanImageFile(event.target.files?.[0]));
+    this.shadowRoot.querySelector("#close-activity")?.addEventListener("click", () => { this._activityLogOpen = false; this._render(); });
+    this.shadowRoot.querySelector("#activity-enabled")?.addEventListener("change", (event) => this._setActivityEnabled(event.target.checked));
+    this.shadowRoot.querySelector("#clear-activity")?.addEventListener("click", () => this._clearActivity());
+    if (this._scannerOpen && typeof document !== "undefined") this._renderScannerDialog();
   }
 }
 
-if (!customElements.get("entity-audit-panel-v0313")) {
-  customElements.define("entity-audit-panel-v0313", EntityAuditPanel);
+if (!customElements.get("entity-audit-panel-v0314")) {
+  customElements.define("entity-audit-panel-v0314", EntityAuditPanel);
 }
