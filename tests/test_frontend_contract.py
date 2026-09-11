@@ -141,6 +141,7 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn("id=\"camera-wait\"", frontend)
         self.assertIn("id=\"retry-camera\"", frontend)
         self.assertIn("_scheduleCameraWaitTimer", frontend)
+        self.assertIn("this._scannerDialog.showModal()", frontend)
         self.assertIn("MAX_ACTIVITY_EVENTS = 1000", CONST_FILE.read_text(encoding="utf-8"))
         self.assertIn("ACTIVITY_EVENT_TYPES", CONST_FILE.read_text(encoding="utf-8"))
         self.assertIn("def _prune_activity", manager)

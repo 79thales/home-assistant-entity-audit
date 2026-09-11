@@ -48,5 +48,5 @@ PROBLEM_STATES = {"unavailable", "unknown"}
 PANEL_URL = "/entity_audit/entity-audit-panel.js"
 QR_LIBRARY_URL = "/entity_audit/qrcode.js"
 QR_READER_LIBRARY_URL = "/entity_audit/jsQR.js"
-PANEL_MODULE_URL = f"{PANEL_URL}?v=0.3.15"
-PANEL_ELEMENT = "entity-audit-panel-v0315"
+PANEL_MODULE_URL = f"{PANEL_URL}?v=0.3.16"
+PANEL_ELEMENT = "entity-audit-panel-v0316"

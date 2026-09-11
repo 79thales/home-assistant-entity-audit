@@ -606,7 +606,14 @@ class EntityAuditPanel extends HTMLElement {
       this.shadowRoot.appendChild(this._scannerDialog);
     }
     this._scannerDialog.innerHTML = this._scannerDialogContent();
-    this._scannerDialog.setAttribute("open", "");
+    if (!this._scannerDialog.open) {
+      try {
+        this._scannerDialog.showModal();
+      } catch (_error) {
+        // The attribute remains a safe fallback for older embedded web views.
+        this._scannerDialog.setAttribute("open", "");
+      }
+    }
     this._scannerDialog.querySelector("#close-scanner")?.addEventListener("click", () => this._closeScanner());
     this._scannerDialog.querySelector("#scan-again")?.addEventListener("click", () => this._startScanner());
     this._scannerDialog.querySelector("#retry-camera")?.addEventListener("click", () => this._startScanner());
@@ -619,6 +626,7 @@ class EntityAuditPanel extends HTMLElement {
   }
 
   _removeScannerDialog() {
+    if (this._scannerDialog?.open) this._scannerDialog.close();
     this._scannerDialog?.remove();
     this._scannerDialog = null;
   }
@@ -1446,6 +1454,6 @@ class EntityAuditPanel extends HTMLElement {
   }
 }
 
-if (!customElements.get("entity-audit-panel-v0315")) {
-  customElements.define("entity-audit-panel-v0315", EntityAuditPanel);
+if (!customElements.get("entity-audit-panel-v0316")) {
+  customElements.define("entity-audit-panel-v0316", EntityAuditPanel);
 }
