@@ -31,7 +31,12 @@ class EntityAuditPanel extends HTMLElement {
   }
 
   set panel(value) { this._panel = value; }
-  set narrow(value) { this._narrow = value; }
+  set narrow(value) {
+    const narrow = Boolean(value);
+    if (this._narrow === narrow) return;
+    this._narrow = narrow;
+    if (this._loaded) this._render();
+  }
 
   connectedCallback() { this._render(); }
 
@@ -449,27 +454,22 @@ class EntityAuditPanel extends HTMLElement {
       <style>
         :host { display:block; min-height:100vh; color:var(--primary-text-color); background:var(--primary-background-color); font-family:Roboto, "Noto Sans", Arial, sans-serif; color-scheme:light dark; }
         * { box-sizing:border-box; }
-        header { position:sticky; top:0; z-index:4; padding:12px 20px 10px; background:var(--app-header-background-color, var(--primary-color)); color:var(--app-header-text-color, white); box-shadow:0 2px 7px #0004; }
-        .header-row, .ribbon, .ribbon-controls { display:flex; align-items:center; gap:10px; }
-        .header-row { justify-content:space-between; margin-bottom:10px; }
-        .heading { min-width:0; }
-        h1 { margin:0; font-size:21px; line-height:1.2; }
-        .result-count { display:block; margin-top:2px; opacity:.82; font-size:13px; }
+        ha-top-app-bar-fixed { display:block; height:100vh; }
+        .system-title { font-size:inherit; font-weight:inherit; }
+        .system-action { width:48px; min-width:48px; padding:0; border:0; color:var(--app-header-text-color, white); background:transparent; font-size:25px; }
+        .system-sub-row, .ribbon-controls { display:flex; align-items:center; gap:10px; }
+        .system-sub-row { width:100%; min-height:58px; padding:7px 16px; color:var(--primary-text-color); background:var(--primary-background-color); border-bottom:1px solid var(--divider-color); }
         button, input, select { font:inherit; }
         button { min-height:44px; border:1px solid var(--divider-color); border-radius:9px; padding:9px 13px; cursor:pointer; font-weight:600; color:var(--primary-text-color); background:var(--card-background-color); }
         button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline:3px solid var(--primary-color); outline-offset:2px; }
-        header button { border-color:rgba(255,255,255,.32); background:rgba(0,0,0,.14); color:inherit; }
-        .search-wrap { flex:1; min-width:0; min-height:46px; display:flex; align-items:center; gap:9px; padding:0 13px; border:1px solid rgba(255,255,255,.34); border-radius:11px; background:rgba(0,0,0,.13); }
+        .search-wrap { flex:1; min-width:180px; min-height:44px; display:flex; align-items:center; gap:9px; padding:0 13px; border:1px solid var(--divider-color); border-radius:11px; color:var(--primary-text-color); background:var(--card-background-color); }
         .search-icon { font-size:24px; line-height:1; opacity:.9; }
         .search { width:100%; min-width:0; border:0; outline:0; color:inherit; background:transparent; font-size:16px; }
-        .search::placeholder { color:inherit; opacity:.72; }
+        .search::placeholder { color:var(--secondary-text-color); opacity:1; }
         .filter-toggle { white-space:nowrap; }
-        .ribbon-controls { margin-top:9px; }
-        .ribbon-controls .filter { min-height:42px; padding:0 11px; border:1px solid rgba(255,255,255,.28); border-radius:9px; color:inherit; }
+        .ribbon-controls .filter { min-height:42px; padding:0 11px; border:1px solid var(--divider-color); border-radius:9px; }
         .select-wrap { position:relative; min-width:200px; }
         .select-wrap select, .filters select { width:100%; min-height:44px; appearance:none; -webkit-appearance:none; border:1px solid var(--divider-color); border-radius:9px; padding:10px 38px 10px 13px; color:var(--primary-text-color); background-color:var(--card-background-color); background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='10' viewBox='0 0 16 10'%3E%3Cpath fill='%238fa4bf' d='m1 1 7 7 7-7' stroke='%238fa4bf' stroke-width='2'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 13px center; }
-        .ribbon-controls select { border-color:rgba(255,255,255,.3); color:inherit; background-color:rgba(0,0,0,.14); }
-        .ribbon-controls .select-wrap select { background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='10' viewBox='0 0 16 10'%3E%3Cpath fill='%23ffffff' d='m1 1 7 7 7-7' stroke='%23ffffff' stroke-width='2'/%3E%3C/svg%3E"); }
         main { max-width:1400px; margin:auto; padding:20px; }
         .stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
         .stat, .card, .filter-panel, .pdf-ready { background:var(--card-background-color); border-radius:12px; box-shadow:var(--ha-card-box-shadow); padding:16px; }
@@ -511,10 +511,8 @@ class EntityAuditPanel extends HTMLElement {
         .event-problem { color:var(--error-color); font-weight:600; }
         .event-recovered { color:var(--success-color); font-weight:600; }
         @media(max-width:700px) {
-          header { padding:10px 12px; }
-          h1 { font-size:19px; }
-          .result-count { font-size:12px; }
-          .ribbon-controls { overflow-x:auto; padding-bottom:1px; }
+          .system-sub-row { display:grid; grid-template-columns:minmax(0,1fr) auto; padding:7px 10px; }
+          .ribbon-controls { grid-column:1 / -1; overflow-x:auto; padding-bottom:1px; }
           .ribbon-controls .select-wrap { min-width:185px; }
           .stats { grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-bottom:12px; }
           .stat { min-height:78px; padding:12px 9px; font-size:12px; overflow-wrap:anywhere; }
@@ -533,28 +531,25 @@ class EntityAuditPanel extends HTMLElement {
           .pdf-ready { padding:12px; }
         }
       </style>
-      <header>
-        <div class="header-row">
-          <div class="heading"><h1>${this._t("Audit entit", "Entity Audit")}</h1><span class="result-count">${rows.length} / ${this._entities.length} ${this._t("entit zobrazeno", "entities shown")}</span></div>
-          <button id="refresh" aria-label="${this._t("Obnovit seznam entit", "Refresh entity list")}">${this._loading ? this._t("Načítám…", "Loading…") : "↻"} <span>${this._t("Obnovit", "Refresh")}</span></button>
-        </div>
-        <div class="ribbon">
+      <ha-top-app-bar-fixed ${this._narrow ? "narrow" : ""}>
+        <span slot="title" class="system-title">${this._t("Audit entit", "Entity Audit")}</span>
+        <button slot="actionItems" id="refresh" class="system-action" title="${this._t("Obnovit seznam entit", "Refresh entity list")}" aria-label="${this._t("Obnovit seznam entit", "Refresh entity list")}">${this._loading ? "…" : "↻"}</button>
+        <div slot="subRow" class="system-sub-row">
           <label class="search-wrap"><span class="search-icon" aria-hidden="true">⌕</span><input id="search" class="search" type="search" placeholder="${this._t("Hledat název, zařízení, entity_id nebo integraci…", "Search name, device, entity_id or integration…")}" value="${this._escape(this._filter)}" aria-label="${this._t("Hledat entity", "Search entities")}"></label>
           <button id="toggle-filters" class="filter-toggle" aria-expanded="${this._filtersOpen}">☰ ${this._t("Filtry", "Filters")}</button>
+          <div class="ribbon-controls">
+            <label class="select-wrap"><select id="group-by" aria-label="${this._t("Seskupit podle", "Group by")}">
+              <option value="none" ${this._groupBy === "none" ? "selected" : ""}>${this._t("Bez seskupení", "No grouping")}</option>
+              <option value="device" ${this._groupBy === "device" ? "selected" : ""}>${this._t("Podle zařízení", "By device")}</option>
+              <option value="manufacturer" ${this._groupBy === "manufacturer" ? "selected" : ""}>${this._t("Podle výrobce", "By manufacturer")}</option>
+              <option value="model" ${this._groupBy === "model" ? "selected" : ""}>${this._t("Podle modelu", "By model")}</option>
+              <option value="platform" ${this._groupBy === "platform" ? "selected" : ""}>${this._t("Podle integrace", "By integration")}</option>
+              <option value="area" ${this._groupBy === "area" ? "selected" : ""}>${this._t("Podle oblasti", "By area")}</option>
+              <option value="domain" ${this._groupBy === "domain" ? "selected" : ""}>${this._t("Podle typu entity", "By entity type")}</option>
+            </select></label>
+            <label class="filter"><input id="problems" type="checkbox" ${this._problemOnly ? "checked" : ""}> ${this._t("Jen problémy", "Problems only")}</label>
+          </div>
         </div>
-        <div class="ribbon-controls">
-          <label class="select-wrap"><select id="group-by" aria-label="${this._t("Seskupit podle", "Group by")}">
-            <option value="none" ${this._groupBy === "none" ? "selected" : ""}>${this._t("Bez seskupení", "No grouping")}</option>
-            <option value="device" ${this._groupBy === "device" ? "selected" : ""}>${this._t("Podle zařízení", "By device")}</option>
-            <option value="manufacturer" ${this._groupBy === "manufacturer" ? "selected" : ""}>${this._t("Podle výrobce", "By manufacturer")}</option>
-            <option value="model" ${this._groupBy === "model" ? "selected" : ""}>${this._t("Podle modelu", "By model")}</option>
-            <option value="platform" ${this._groupBy === "platform" ? "selected" : ""}>${this._t("Podle integrace", "By integration")}</option>
-            <option value="area" ${this._groupBy === "area" ? "selected" : ""}>${this._t("Podle oblasti", "By area")}</option>
-            <option value="domain" ${this._groupBy === "domain" ? "selected" : ""}>${this._t("Podle typu entity", "By entity type")}</option>
-          </select></label>
-          <label class="filter"><input id="problems" type="checkbox" ${this._problemOnly ? "checked" : ""}> ${this._t("Jen problémy", "Problems only")}</label>
-        </div>
-      </header>
       <main>
         ${this._error ? `<div class="card problem">${this._escape(this._error)}</div>` : ""}
         <section class="stats">
@@ -632,6 +627,7 @@ class EntityAuditPanel extends HTMLElement {
           ${this._history.map((event) => `<div class="history"><span>${this._escape(new Date(event.timestamp).toLocaleString())}</span><span class="event-${this._escape(event.type)}">${this._escape(event.type)}</span><span>${this._escape(event.old_state ?? "—")} → ${this._escape(event.new_state ?? "—")}</span></div>`).join("") || `<div class="empty">${this._t("Zatím bez záznamů", "No records yet")}</div>`}
         </div>
       </dialog>` : ""}
+      </ha-top-app-bar-fixed>
     `;
 
     this.shadowRoot.querySelector("#refresh")?.addEventListener("click", () => this._load());
@@ -671,6 +667,6 @@ class EntityAuditPanel extends HTMLElement {
   }
 }
 
-if (!customElements.get("entity-audit-panel-v039")) {
-  customElements.define("entity-audit-panel-v039", EntityAuditPanel);
+if (!customElements.get("entity-audit-panel-v0310")) {
+  customElements.define("entity-audit-panel-v0310", EntityAuditPanel);
 }

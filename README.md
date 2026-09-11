@@ -16,6 +16,7 @@ Entity Audit is a HACS-compatible custom integration that gives administrators o
 - exports the currently filtered entity list to a UTF-8 CSV file, including available IP and MAC addresses;
 - creates a downloadable A4 PDF label sheet for the currently filtered devices with an IP address, deduplicated by IP address, including manufacturer, area, IP, and MAC address; set the label width and height in millimeters, then open, save, print, or share the generated PDF;
 - opens the native Home Assistant entity detail by clicking its current state;
+- uses Home Assistant's system app bar with native sidebar navigation and mobile safe-area handling;
 - flags current `unavailable` and `unknown` states, plus active entity-registry entries that are missing from the runtime state machine;
 - enables or disables audit logging separately for every entity;
 - records state transitions, problem starts, and recoveries;

@@ -18,6 +18,7 @@ FRONTEND_FILE = (
     / "entity-audit-panel.js"
 )
 MANIFEST_FILE = ROOT / "custom_components" / "entity_audit" / "manifest.json"
+INIT_FILE = ROOT / "custom_components" / "entity_audit" / "__init__.py"
 
 
 class FrontendContractTest(unittest.TestCase):
@@ -56,13 +57,22 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn('type: "application/pdf"', frontend)
         self.assertNotIn("window.open(", frontend)
 
-    def test_mobile_ribbon_keeps_search_and_filters_available(self) -> None:
+    def test_system_toolbar_keeps_search_and_filters_available(self) -> None:
         frontend = FRONTEND_FILE.read_text(encoding="utf-8")
 
-        self.assertIn('class="ribbon"', frontend)
+        self.assertIn("<ha-top-app-bar-fixed", frontend)
+        self.assertIn('slot="title"', frontend)
+        self.assertIn('slot="actionItems"', frontend)
+        self.assertIn('slot="subRow"', frontend)
         self.assertIn('id="search"', frontend)
         self.assertIn('id="toggle-filters"', frontend)
         self.assertIn(".filter-panel:not(.open)", frontend)
+
+    def test_panel_runs_in_home_assistant_dom_for_system_toolbar(self) -> None:
+        registration = INIT_FILE.read_text(encoding="utf-8")
+
+        self.assertIn('"embed_iframe": False', registration)
+        self.assertIn('"handle_safe_area": True', registration)
 
 
 if __name__ == "__main__":
