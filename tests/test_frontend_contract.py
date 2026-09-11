@@ -101,6 +101,9 @@ class FrontendContractTest(unittest.TestCase):
         )
         self.assertIn('id="open-scanner"', frontend)
         self.assertIn("navigator.mediaDevices?.getUserMedia", frontend)
+        self.assertIn("Request the camera before any rendering", frontend)
+        self.assertIn("_cameraAccessMessage", frontend)
+        self.assertIn("window.isSecureContext", frontend)
         self.assertIn(
             'id="scan-camera-image" type="file" accept="image/*" '
             'capture="environment"',

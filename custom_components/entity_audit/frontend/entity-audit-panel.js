@@ -29,6 +29,8 @@ class EntityAuditPanel extends HTMLElement {
     this._scannerFrame = null;
     this._scannerCanvas = null;
     this._scannerError = null;
+    this._scannerStarting = false;
+    this._scannerReaderFailed = false;
     this._scanResult = null;
     this._scanMatchedDevice = null;
     this._scanningImage = false;
@@ -322,6 +324,10 @@ class EntityAuditPanel extends HTMLElement {
 
   _scanCameraFrame(timestamp = 0) {
     if (!this._scannerOpen || !this._scannerStream || this._scanResult) return;
+    if (typeof window.jsQR !== "function") {
+      this._scannerFrame = requestAnimationFrame((nextTimestamp) => this._scanCameraFrame(nextTimestamp));
+      return;
+    }
     const video = this.shadowRoot.querySelector("#scanner-video");
     if (video?.readyState >= 2 && timestamp - this._lastScanTime >= 200) {
       this._lastScanTime = timestamp;
@@ -358,39 +364,99 @@ class EntityAuditPanel extends HTMLElement {
     });
   }
 
+  _cameraAccessMessage(error) {
+    if (!window.isSecureContext) {
+      return this._t(
+        "Živá kamera vyžaduje zabezpečené připojení HTTPS. Použijte HTTPS nebo načtěte fotografii QR kódu.",
+        "Live camera access requires a secure HTTPS connection. Use HTTPS or scan a QR-code photo."
+      );
+    }
+    if (error?.name === "NotAllowedError") {
+      return this._t(
+        "Přístup ke kameře byl zamítnut. V nastavení iOS povolte aplikaci Home Assistant přístup ke kameře.",
+        "Camera access was denied. Allow camera access for the Home Assistant app in iOS Settings."
+      );
+    }
+    if (error?.name === "NotReadableError") {
+      return this._t(
+        "Kameru nyní používá jiná aplikace. Zavřete ji a zkuste to znovu.",
+        "Another app is using the camera. Close it and try again."
+      );
+    }
+    if (error?.name === "NotFoundError") {
+      return this._t(
+        "Na tomto zařízení není dostupná kamera.",
+        "No camera is available on this device."
+      );
+    }
+    return this._t(
+      "Kameru nelze otevřít. Povolte přístup ke kameře, nebo použijte fotografii.",
+      "The camera cannot be opened. Allow camera access or use a photo."
+    );
+  }
+
   async _startScanner() {
     this._stopScannerCamera();
     this._scannerOpen = true;
     this._scannerError = null;
     this._scanResult = null;
     this._scanMatchedDevice = null;
-    this._render();
-    try {
-      await this._loadQrReaderLibrary();
-      if (!navigator.mediaDevices?.getUserMedia) {
-        this._scannerError = this._t(
-          "Živá kamera zde není dostupná. Vyfoťte nebo vyberte QR kód.",
-          "Live camera access is unavailable here. Take or select a QR-code photo."
-        );
-        this._render();
-        return;
+    this._scannerStarting = true;
+    this._scannerReaderFailed = false;
+
+    // Request the camera before any rendering or async library loading. iOS may
+    // require getUserMedia to run directly in the button's user gesture.
+    let cameraRequest = null;
+    if (typeof navigator.mediaDevices?.getUserMedia === "function") {
+      try {
+        cameraRequest = navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: { ideal: "environment" } },
+        });
+      } catch (error) {
+        cameraRequest = Promise.reject(error);
       }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: { facingMode: { ideal: "environment" } },
-      });
+    }
+    const readerRequest = this._loadQrReaderLibrary();
+    this._render();
+
+    readerRequest.catch(() => {
+      if (!this._scannerOpen) return;
+      this._scannerReaderFailed = true;
+      this._scannerStarting = false;
+      this._stopScannerCamera();
+      this._scannerError = this._t(
+        "Čtečku QR kódů se nepodařilo načíst. Použijte aktualizovaný panel a zkuste to znovu.",
+        "The QR reader could not be loaded. Reload the updated panel and try again."
+      );
+      this._render();
+    });
+
+    if (!cameraRequest) {
+      this._scannerStarting = false;
+      this._scannerError = this._cameraAccessMessage();
+      this._render();
+      return;
+    }
+
+    try {
+      const stream = await cameraRequest;
       if (!this._scannerOpen) {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
+      if (this._scannerReaderFailed) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       this._scannerStream = stream;
+      this._scannerStarting = false;
       this._render();
       this._attachScannerStream();
-    } catch (_error) {
-      this._scannerError = this._t(
-        "Kameru nelze otevřít. Povolte přístup ke kameře, nebo použijte fotografii.",
-        "The camera cannot be opened. Allow camera access or use a photo."
-      );
+    } catch (error) {
+      if (!this._scannerOpen || this._scannerReaderFailed) return;
+      this._scannerStarting = false;
+      this._scannerError = this._cameraAccessMessage(error);
       this._render();
     }
   }
@@ -408,6 +474,8 @@ class EntityAuditPanel extends HTMLElement {
     this._stopScannerCamera();
     this._scannerOpen = false;
     this._scannerError = null;
+    this._scannerStarting = false;
+    this._scannerReaderFailed = false;
     this._scanResult = null;
     this._scanMatchedDevice = null;
     this._render();
@@ -902,6 +970,7 @@ class EntityAuditPanel extends HTMLElement {
         .camera-guide { position:absolute; inset:50% auto auto 50%; width:min(68%, 280px); aspect-ratio:1; transform:translate(-50%,-50%); border:3px solid white; border-radius:16px; box-shadow:0 0 0 999px #0005; pointer-events:none; }
         .camera-hint { position:absolute; left:12px; right:12px; bottom:12px; padding:8px; border-radius:8px; text-align:center; background:#000a; font-size:13px; }
         .scanner-error { padding:11px 13px; border-radius:9px; color:var(--error-color); background:var(--secondary-background-color); font-weight:600; }
+        .scanner-note { padding:10px 12px; border-left:3px solid var(--primary-color); color:var(--secondary-text-color); background:var(--secondary-background-color); font-size:14px; line-height:1.4; }
         .scanner-actions { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
         .file-button, .primary-link { display:inline-flex; min-height:44px; align-items:center; justify-content:center; border-radius:9px; padding:9px 13px; cursor:pointer; font-weight:600; text-decoration:none; }
         .file-button { border:1px solid var(--divider-color); color:var(--primary-text-color); background:var(--card-background-color); }
@@ -1060,8 +1129,9 @@ class EntityAuditPanel extends HTMLElement {
           <div class="scanner-actions">
             ${this._scanMatchedDevice ? `<button id="filter-scanned-device">${this._t("Zobrazit jeho entity", "Show its entities")}</button><a class="primary-link" href="/config/devices/device/${this._escape(this._scanMatchedDevice.device_id)}">${this._t("Otevřít stránku zařízení", "Open device page")}</a>` : ""}
             <button id="scan-again">${this._t("Skenovat znovu", "Scan again")}</button>
-          </div>` : `<div class="camera-stage"><video id="scanner-video" muted playsinline></video><div class="camera-guide"></div><div class="camera-hint">${this._t("Umístěte QR kód doprostřed rámečku", "Place the QR code inside the frame")}</div></div>`}
+          </div>` : `<div class="camera-stage"><video id="scanner-video" muted playsinline></video><div class="camera-guide"></div><div class="camera-hint">${this._scannerStarting ? this._t("Čekám na povolení kamery…", "Waiting for camera permission…") : this._t("Umístěte QR kód doprostřed rámečku", "Place the QR code inside the frame")}</div></div>`}
           ${this._scannerError ? `<div class="scanner-error">${this._escape(this._scannerError)}</div>` : ""}
+          ${!window.isSecureContext ? `<div class="scanner-note">${this._t("Pro spolehlivou živou kameru na iPhonu otevřete Home Assistant přes HTTPS. QR kód lze také načíst z fotografie.", "For reliable live camera scanning on iPhone, open Home Assistant over HTTPS. You can also scan a QR-code photo.")}</div>` : ""}
           ${!this._scanResult ? `<div class="scanner-actions"><label class="file-button">${this._scanningImage ? this._t("Zpracovávám obrázek…", "Processing image…") : this._t("Vyfotit QR kód", "Take a QR-code photo")}<input id="scan-camera-image" type="file" accept="image/*" capture="environment" ${this._scanningImage ? "disabled" : ""}></label><label class="file-button">${this._t("Vybrat obrázek", "Select an image")}<input id="scan-image" type="file" accept="image/*" ${this._scanningImage ? "disabled" : ""}></label></div>` : ""}
         </div>
       </dialog>` : ""}
@@ -1112,6 +1182,6 @@ class EntityAuditPanel extends HTMLElement {
   }
 }
 
-if (!customElements.get("entity-audit-panel-v0312")) {
-  customElements.define("entity-audit-panel-v0312", EntityAuditPanel);
+if (!customElements.get("entity-audit-panel-v0313")) {
+  customElements.define("entity-audit-panel-v0313", EntityAuditPanel);
 }

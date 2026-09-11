@@ -48,6 +48,8 @@ The default retention is 30 days and 500 events per entity. The enabled-entity l
 
 QR labels are generated entirely in the browser with the bundled MIT-licensed `qrcode-generator` library. Scanning uses the bundled Apache-2.0-licensed `jsQR` decoder. Generation and decoding are local: label images and decoded label data are not sent to a QR-code service. Camera access is requested only when the administrator opens the scanner; a photo capture/file option is available when live camera access is unavailable.
 
+Live camera access uses the browser media API. For dependable scanning on iPhone, access Home Assistant over HTTPS and allow Camera access for the Home Assistant Companion app in iOS Settings. The scanner always retains its photo capture and image-selection fallback.
+
 Disabling auditing stops future recording without deleting existing history. Stored records remain subject to the configured age and per-entity limits and can also be deleted manually from the panel.
 
 ## Existing alternatives

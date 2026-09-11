@@ -136,3 +136,42 @@ if (panel.shadowRoot.innerHTML.includes("<script>alert(1)</script>")) {
 if (!panel.shadowRoot.innerHTML.includes('href="/config/devices/device/device-1"')) {
   throw new Error("Matched virtual label does not link to the Home Assistant device page");
 }
+
+async function testCameraRequestUsesTheOriginalTap() {
+  const originalNavigator = Object.getOwnPropertyDescriptor(global, "navigator");
+  const originalSecureContext = global.isSecureContext;
+  let rendered = false;
+  let cameraRequests = 0;
+  const stream = { getTracks: () => [] };
+  Object.defineProperty(global, "navigator", {
+    configurable: true,
+    value: {
+      mediaDevices: {
+        getUserMedia() {
+          if (rendered) throw new Error("Camera was requested after rendering");
+          cameraRequests += 1;
+          return Promise.resolve(stream);
+        },
+      },
+    },
+  });
+  global.isSecureContext = true;
+  global.window.jsQR = jsQR;
+  const scanner = new global.EntityAuditPanel();
+  scanner._render = () => { rendered = true; };
+
+  try {
+    await scanner._startScanner();
+    if (cameraRequests !== 1) throw new Error("Camera was not requested exactly once");
+    if (scanner._scannerStream !== stream) throw new Error("Camera stream was not retained");
+  } finally {
+    if (originalNavigator) Object.defineProperty(global, "navigator", originalNavigator);
+    else delete global.navigator;
+    global.isSecureContext = originalSecureContext;
+  }
+}
+
+testCameraRequestUsesTheOriginalTap().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
