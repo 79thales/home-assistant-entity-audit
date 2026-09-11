@@ -18,6 +18,8 @@ class EntityAuditPanel extends HTMLElement {
     this._loading = false;
     this._labelWidth = 60;
     this._labelHeight = 38;
+    this._filtersOpen = false;
+    this._labelPdf = null;
   }
 
   set hass(value) {
@@ -32,6 +34,10 @@ class EntityAuditPanel extends HTMLElement {
   set narrow(value) { this._narrow = value; }
 
   connectedCallback() { this._render(); }
+
+  disconnectedCallback() {
+    this._revokeLabelPdf();
+  }
 
   _t(cs, en) {
     return this._hass?.language === "cs" ? cs : en;
@@ -160,7 +166,174 @@ class EntityAuditPanel extends HTMLElement {
     );
   }
 
-  _printLabels(rows) {
+  _revokeLabelPdf() {
+    if (this._labelPdf?.url) URL.revokeObjectURL(this._labelPdf.url);
+    this._labelPdf = null;
+  }
+
+  _dataUrlToBytes(dataUrl) {
+    const encoded = dataUrl.slice(dataUrl.indexOf(",") + 1);
+    const binary = atob(encoded);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return bytes;
+  }
+
+  _truncateCanvasText(context, value, maxWidth) {
+    const text = String(value ?? "");
+    if (context.measureText(text).width <= maxWidth) return text;
+    let truncated = text;
+    while (truncated && context.measureText(`${truncated}…`).width > maxWidth) {
+      truncated = truncated.slice(0, -1);
+    }
+    return `${truncated}…`;
+  }
+
+  _wrapCanvasText(context, value, maxWidth, maxLines) {
+    const words = String(value ?? "").trim().split(/\s+/).filter(Boolean);
+    const lines = [];
+    let line = "";
+    for (const word of words) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (!line || context.measureText(candidate).width <= maxWidth) {
+        line = candidate;
+      } else {
+        lines.push(this._truncateCanvasText(context, line, maxWidth));
+        line = word;
+      }
+      if (lines.length === maxLines) break;
+    }
+    if (line && lines.length < maxLines) lines.push(this._truncateCanvasText(context, line, maxWidth));
+    if (!lines.length) lines.push("—");
+    return lines.slice(0, maxLines);
+  }
+
+  _drawPdfLabel(context, x, y, width, height, entity) {
+    const padding = Math.max(10, Math.round(Math.min(width, height) * 0.06));
+    const titleSize = Math.max(14, Math.min(28, Math.round(height * 0.105)));
+    const textSize = Math.max(10, Math.min(18, Math.round(height * 0.058)));
+    const lineHeight = Math.round(textSize * 1.38);
+    const unavailable = this._t("neuvedeno", "not available");
+    const manufacturerLabel = this._t("Výrobce", "Manufacturer");
+    const areaLabel = this._t("Umístění", "Area");
+
+    context.save();
+    context.fillStyle = "#ffffff";
+    context.fillRect(x, y, width, height);
+    context.strokeStyle = "#111827";
+    context.lineWidth = 2;
+    context.strokeRect(x + 1, y + 1, width - 2, height - 2);
+    context.fillStyle = "#111827";
+    context.font = `700 ${titleSize}px Arial, sans-serif`;
+    const titleLines = this._wrapCanvasText(context, entity.device_name || entity.name, width - (padding * 2), 2);
+    let cursor = y + padding + titleSize;
+    for (const line of titleLines) {
+      context.fillText(line, x + padding, cursor);
+      cursor += Math.round(titleSize * 1.16);
+    }
+    cursor += Math.max(3, Math.round(height * 0.025));
+    context.font = `600 ${textSize}px Arial, sans-serif`;
+    const fields = [
+      ["IP", entity.ip_address],
+      ["MAC", entity.mac_address || unavailable],
+      [manufacturerLabel, entity.manufacturer || unavailable],
+      [areaLabel, entity.area_name || unavailable],
+    ];
+    for (const [label, value] of fields) {
+      if (cursor > y + height - padding) break;
+      context.fillText(
+        this._truncateCanvasText(context, `${label}: ${value}`, width - (padding * 2)),
+        x + padding,
+        cursor
+      );
+      cursor += lineHeight;
+    }
+    context.restore();
+  }
+
+  _buildLabelsPdf(devices, labelWidth, labelHeight) {
+    const dpi = 150;
+    const pageWidth = 1240;
+    const pageHeight = 1754;
+    const margin = Math.round((8 / 25.4) * dpi);
+    const gap = Math.round((3 / 25.4) * dpi);
+    const labelWidthPx = Math.round((labelWidth / 25.4) * dpi);
+    const labelHeightPx = Math.round((labelHeight / 25.4) * dpi);
+    const columns = Math.max(1, Math.floor((pageWidth - (margin * 2) + gap) / (labelWidthPx + gap)));
+    const rows = Math.max(1, Math.floor((pageHeight - (margin * 2) + gap) / (labelHeightPx + gap)));
+    const perPage = columns * rows;
+    const pages = [];
+
+    for (let start = 0; start < devices.length; start += perPage) {
+      const canvas = document.createElement("canvas");
+      canvas.width = pageWidth;
+      canvas.height = pageHeight;
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, pageWidth, pageHeight);
+      devices.slice(start, start + perPage).forEach((entity, index) => {
+        const column = index % columns;
+        const row = Math.floor(index / columns);
+        this._drawPdfLabel(
+          context,
+          margin + (column * (labelWidthPx + gap)),
+          margin + (row * (labelHeightPx + gap)),
+          labelWidthPx,
+          labelHeightPx,
+          entity
+        );
+      });
+      pages.push(this._dataUrlToBytes(canvas.toDataURL("image/jpeg", 0.92)));
+    }
+    return this._assemblePdf(pages, pageWidth, pageHeight);
+  }
+
+  _assemblePdf(pageImages, imageWidth, imageHeight) {
+    const encoder = new TextEncoder();
+    const chunks = [];
+    const offsets = [];
+    let length = 0;
+    const appendText = (value) => {
+      const bytes = encoder.encode(value);
+      chunks.push(bytes);
+      length += bytes.length;
+    };
+    const appendBytes = (bytes) => {
+      chunks.push(bytes);
+      length += bytes.length;
+    };
+    const appendObject = (number, value) => {
+      offsets[number] = length;
+      appendText(`${number} 0 obj\n${value}\nendobj\n`);
+    };
+    const objectCount = 2 + (pageImages.length * 3);
+    const pageReferences = pageImages.map((_, index) => `${3 + (index * 3)} 0 R`).join(" ");
+
+    appendText("%PDF-1.4\n%EntityAudit\n");
+    appendObject(1, "<< /Type /Catalog /Pages 2 0 R >>");
+    appendObject(2, `<< /Type /Pages /Kids [${pageReferences}] /Count ${pageImages.length} >>`);
+    pageImages.forEach((image, index) => {
+      const pageObject = 3 + (index * 3);
+      const contentObject = pageObject + 1;
+      const imageObject = pageObject + 2;
+      const content = `q\n595.28 0 0 841.89 0 0 cm\n/Im0 Do\nQ\n`;
+      appendObject(pageObject, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /XObject << /Im0 ${imageObject} 0 R >> >> /Contents ${contentObject} 0 R >>`);
+      appendObject(contentObject, `<< /Length ${encoder.encode(content).length} >>\nstream\n${content}endstream`);
+      offsets[imageObject] = length;
+      appendText(`${imageObject} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${imageWidth} /Height ${imageHeight} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${image.length} >>\nstream\n`);
+      appendBytes(image);
+      appendText("\nendstream\nendobj\n");
+    });
+    const xrefOffset = length;
+    appendText(`xref\n0 ${objectCount + 1}\n0000000000 65535 f \n`);
+    for (let number = 1; number <= objectCount; number += 1) {
+      appendText(`${String(offsets[number]).padStart(10, "0")} 00000 n \n`);
+    }
+    appendText(`trailer\n<< /Size ${objectCount + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
+    return new Blob(chunks, { type: "application/pdf" });
+  }
+
+  _downloadLabelsPdf(rows) {
     const devices = this._labelDevices(rows);
     if (!devices.length) {
       alert(this._t(
@@ -172,48 +345,28 @@ class EntityAuditPanel extends HTMLElement {
 
     const labelWidth = Math.min(190, Math.max(20, Number(this._labelWidth) || 60));
     const labelHeight = Math.min(280, Math.max(20, Number(this._labelHeight) || 38));
+    const blob = this._buildLabelsPdf(devices, labelWidth, labelHeight);
+    this._revokeLabelPdf();
+    this._labelPdf = {
+      blob,
+      filename: `entity-audit-labels-${new Date().toISOString().slice(0, 10)}.pdf`,
+      url: URL.createObjectURL(blob),
+    };
+    this._render();
+  }
 
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      alert(this._t(
-        "Pro vytvoření štítků povolte v prohlížeči vyskakovací okna.",
-        "Allow pop-ups in the browser to create labels."
-      ));
-      return;
+  async _shareLabelPdf() {
+    if (!this._labelPdf || !navigator.canShare || !navigator.share) return;
+    const file = new File([this._labelPdf.blob], this._labelPdf.filename, { type: "application/pdf" });
+    if (!navigator.canShare({ files: [file] })) return;
+    try {
+      await navigator.share({
+        files: [file],
+        title: this._t("Štítky zařízení", "Device labels"),
+      });
+    } catch (error) {
+      if (error?.name !== "AbortError") alert(this._t("PDF se nepodařilo otevřít pro sdílení.", "The PDF could not be opened for sharing."));
     }
-    printWindow.opener = null;
-    const title = this._t("Štítky zařízení", "Device labels");
-    const manufacturerLabel = this._t("Výrobce", "Manufacturer");
-    const areaLabel = this._t("Umístění", "Area");
-    const unavailable = this._t("neuvedeno", "not available");
-    const labels = devices.map((entity) => `
-      <article class="label">
-        <h1>${this._escape(entity.device_name || entity.name)}</h1>
-        <dl>
-          <div><dt>IP</dt><dd>${this._escape(entity.ip_address)}</dd></div>
-          <div><dt>MAC</dt><dd>${this._escape(entity.mac_address || unavailable)}</dd></div>
-          <div><dt>${this._escape(manufacturerLabel)}</dt><dd>${this._escape(entity.manufacturer || unavailable)}</dd></div>
-          <div><dt>${this._escape(areaLabel)}</dt><dd>${this._escape(entity.area_name || unavailable)}</dd></div>
-        </dl>
-      </article>`).join("");
-
-    printWindow.addEventListener("load", () => {
-      printWindow.focus();
-      printWindow.print();
-    }, { once: true });
-    printWindow.document.write(`<!doctype html><html lang="${this._hass?.language || "en"}"><head><meta charset="utf-8"><title>${this._escape(title)}</title><style>
-      @page { size: A4 portrait; margin: 8mm; }
-      * { box-sizing: border-box; }
-      body { font-family: Arial, sans-serif; margin: 0; color: #111; }
-      .labels { display: grid; grid-template-columns: repeat(auto-fill, ${labelWidth}mm); grid-auto-rows: ${labelHeight}mm; gap: 3mm; }
-      .label { border: .3mm solid #111; height: ${labelHeight}mm; padding: 3mm; break-inside: avoid; overflow: hidden; }
-      h1 { font-size: 13pt; line-height: 1.12; margin: 0 0 3mm; overflow-wrap: anywhere; }
-      dl { margin: 0; font-size: 9pt; }
-      dl div { display: flex; gap: 2mm; margin: 1mm 0; }
-      dt { color: #444; min-width: 20mm; }
-      dd { font-family: "Courier New", monospace; font-weight: bold; margin: 0; overflow-wrap: anywhere; }
-    </style></head><body><main class="labels">${labels}</main></body></html>`);
-    printWindow.document.close();
   }
 
   _escape(value) {
@@ -294,39 +447,59 @@ class EntityAuditPanel extends HTMLElement {
 
     this.shadowRoot.innerHTML = `
       <style>
-        :host { display:block; color:var(--primary-text-color); background:var(--primary-background-color); min-height:100vh; }
+        :host { display:block; min-height:100vh; color:var(--primary-text-color); background:var(--primary-background-color); font-family:Roboto, "Noto Sans", Arial, sans-serif; color-scheme:light dark; }
         * { box-sizing:border-box; }
-        header { padding:20px 24px; background:var(--app-header-background-color, var(--primary-color)); color:var(--app-header-text-color, white); display:flex; align-items:center; gap:14px; }
-        h1 { margin:0; font-size:22px; flex:1; }
+        header { position:sticky; top:0; z-index:4; padding:12px 20px 10px; background:var(--app-header-background-color, var(--primary-color)); color:var(--app-header-text-color, white); box-shadow:0 2px 7px #0004; }
+        .header-row, .ribbon, .ribbon-controls { display:flex; align-items:center; gap:10px; }
+        .header-row { justify-content:space-between; margin-bottom:10px; }
+        .heading { min-width:0; }
+        h1 { margin:0; font-size:21px; line-height:1.2; }
+        .result-count { display:block; margin-top:2px; opacity:.82; font-size:13px; }
         button, input, select { font:inherit; }
-        button { border:0; border-radius:8px; padding:9px 13px; cursor:pointer; color:var(--primary-text-color); background:var(--secondary-background-color); }
-        header button { background:rgba(255,255,255,.16); color:inherit; }
+        button { min-height:44px; border:1px solid var(--divider-color); border-radius:9px; padding:9px 13px; cursor:pointer; font-weight:600; color:var(--primary-text-color); background:var(--card-background-color); }
+        button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline:3px solid var(--primary-color); outline-offset:2px; }
+        header button { border-color:rgba(255,255,255,.32); background:rgba(0,0,0,.14); color:inherit; }
+        .search-wrap { flex:1; min-width:0; min-height:46px; display:flex; align-items:center; gap:9px; padding:0 13px; border:1px solid rgba(255,255,255,.34); border-radius:11px; background:rgba(0,0,0,.13); }
+        .search-icon { font-size:24px; line-height:1; opacity:.9; }
+        .search { width:100%; min-width:0; border:0; outline:0; color:inherit; background:transparent; font-size:16px; }
+        .search::placeholder { color:inherit; opacity:.72; }
+        .filter-toggle { white-space:nowrap; }
+        .ribbon-controls { margin-top:9px; }
+        .ribbon-controls .filter { min-height:42px; padding:0 11px; border:1px solid rgba(255,255,255,.28); border-radius:9px; color:inherit; }
+        .select-wrap { position:relative; min-width:200px; }
+        .select-wrap select, .filters select { width:100%; min-height:44px; appearance:none; -webkit-appearance:none; border:1px solid var(--divider-color); border-radius:9px; padding:10px 38px 10px 13px; color:var(--primary-text-color); background-color:var(--card-background-color); background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='10' viewBox='0 0 16 10'%3E%3Cpath fill='%238fa4bf' d='m1 1 7 7 7-7' stroke='%238fa4bf' stroke-width='2'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 13px center; }
+        .ribbon-controls select { border-color:rgba(255,255,255,.3); color:inherit; background-color:rgba(0,0,0,.14); }
+        .ribbon-controls .select-wrap select { background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='10' viewBox='0 0 16 10'%3E%3Cpath fill='%23ffffff' d='m1 1 7 7 7-7' stroke='%23ffffff' stroke-width='2'/%3E%3C/svg%3E"); }
         main { max-width:1400px; margin:auto; padding:20px; }
         .stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
-        .stat, .card { background:var(--card-background-color); border-radius:12px; box-shadow:var(--ha-card-box-shadow); padding:16px; }
-        .stat b { font-size:26px; display:block; }
-        .toolbar { display:flex; gap:12px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
-        .filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-bottom:12px; }
-        .search { flex:1; }
-        .search, select { border:1px solid var(--divider-color); border-radius:9px; padding:11px 13px; color:var(--primary-text-color); background:var(--card-background-color); min-width:0; }
+        .stat, .card, .filter-panel, .pdf-ready { background:var(--card-background-color); border-radius:12px; box-shadow:var(--ha-card-box-shadow); padding:16px; }
+        .stat b { font-size:28px; line-height:1.05; display:block; }
+        .stat { font-size:14px; font-weight:500; }
+        .filter-panel { margin-bottom:12px; }
+        .toolbar { display:flex; gap:10px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
+        .filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px; }
         .device-filter { min-width:260px; max-width:460px; }
-        label.filter { display:flex; gap:7px; align-items:center; white-space:nowrap; }
+        label.filter { display:flex; gap:8px; align-items:center; white-space:nowrap; font-size:15px; font-weight:600; }
+        input[type="checkbox"] { width:20px; height:20px; accent-color:var(--primary-color); }
         label.label-size { display:flex; align-items:center; gap:5px; white-space:nowrap; }
-        .label-size input { width:64px; border:1px solid var(--divider-color); border-radius:7px; padding:8px; color:var(--primary-text-color); background:var(--card-background-color); }
+        .label-size input { width:68px; min-height:44px; border:1px solid var(--divider-color); border-radius:7px; padding:8px; color:var(--primary-text-color); background:var(--primary-background-color); }
+        .pdf-ready { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; border:1px solid var(--primary-color); font-size:15px; font-weight:600; }
+        .pdf-ready a { display:inline-flex; align-items:center; min-height:42px; padding:8px 12px; border-radius:9px; color:var(--text-primary-color, white); background:var(--primary-color); text-decoration:none; }
+        .pdf-ready button { color:var(--primary-color); border-color:var(--primary-color); background:transparent; }
         .table-wrap { overflow:auto; background:var(--card-background-color); border-radius:12px; box-shadow:var(--ha-card-box-shadow); }
         table { width:100%; border-collapse:collapse; }
-        th, td { padding:11px 13px; text-align:left; border-bottom:1px solid var(--divider-color); }
-        th { font-size:12px; color:var(--secondary-text-color); text-transform:uppercase; position:sticky; top:0; background:var(--card-background-color); }
+        th, td { padding:12px 13px; text-align:left; border-bottom:1px solid var(--divider-color); }
+        th { font-size:12px; color:var(--secondary-text-color); text-transform:uppercase; letter-spacing:.03em; position:sticky; top:0; background:var(--card-background-color); }
         tr:hover td { background:var(--secondary-background-color); }
         .group-row td { position:sticky; top:38px; z-index:1; background:var(--secondary-background-color); font-weight:700; }
         .group-summary { color:var(--secondary-text-color); font-size:12px; font-weight:400; margin-left:8px; }
-        .name { font-weight:600; }
-        .entity-id, .muted { color:var(--secondary-text-color); font-size:12px; }
-        .badge { display:inline-block; border-radius:999px; padding:4px 8px; font-size:12px; background:var(--secondary-background-color); }
+        .name { font-size:15px; font-weight:700; }
+        .entity-id, .muted { color:var(--secondary-text-color); font-size:13px; line-height:1.35; }
+        .badge { display:inline-block; border-radius:999px; padding:5px 9px; font-size:13px; font-weight:600; background:var(--secondary-background-color); }
         .problem { background:var(--error-color); color:white; }
         .ok { color:var(--success-color); }
-        .switch { width:18px; height:18px; }
-        .link, .state-button { color:var(--primary-color); background:transparent; padding:4px; }
+        .switch { width:20px; height:20px; }
+        .link, .state-button { min-height:0; color:var(--primary-color); background:transparent; border:0; padding:5px; }
         .state-button { text-align:left; }
         .empty { text-align:center; padding:35px; color:var(--secondary-text-color); }
         dialog { width:min(850px, calc(100vw - 24px)); max-height:85vh; border:0; border-radius:14px; color:var(--primary-text-color); background:var(--card-background-color); padding:0; box-shadow:0 14px 50px #0006; }
@@ -337,11 +510,50 @@ class EntityAuditPanel extends HTMLElement {
         .history { display:grid; grid-template-columns:170px 100px 1fr; gap:10px; padding:10px 0; border-bottom:1px solid var(--divider-color); font-size:13px; }
         .event-problem { color:var(--error-color); font-weight:600; }
         .event-recovered { color:var(--success-color); font-weight:600; }
-        @media(max-width:700px) { .stats { grid-template-columns:1fr; } .toolbar { align-items:stretch; flex-direction:column; } .device-filter { min-width:0; max-width:none; } th:nth-child(4), td:nth-child(4) { display:none; } .history { grid-template-columns:1fr; } }
+        @media(max-width:700px) {
+          header { padding:10px 12px; }
+          h1 { font-size:19px; }
+          .result-count { font-size:12px; }
+          .ribbon-controls { overflow-x:auto; padding-bottom:1px; }
+          .ribbon-controls .select-wrap { min-width:185px; }
+          .stats { grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-bottom:12px; }
+          .stat { min-height:78px; padding:12px 9px; font-size:12px; overflow-wrap:anywhere; }
+          .stat b { font-size:24px; }
+          main { padding:12px; }
+          .filter-panel { padding:12px; }
+          .filter-panel:not(.open) { display:none; }
+          .toolbar { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:stretch; }
+          .toolbar button, .toolbar .label-size { width:100%; }
+          .toolbar .label-size { grid-column:span 2; justify-content:space-between; }
+          .filters { grid-template-columns:1fr; }
+          .device-filter { min-width:0; max-width:none; }
+          th:nth-child(3), td:nth-child(3), th:nth-child(4), td:nth-child(4) { display:none; }
+          .group-row td { top:38px; }
+          .history { grid-template-columns:1fr; }
+          .pdf-ready { padding:12px; }
+        }
       </style>
       <header>
-        <h1>${this._t("Audit entit", "Entity Audit")}</h1>
-        <button id="refresh">${this._loading ? this._t("Načítám…", "Loading…") : this._t("Obnovit", "Refresh")}</button>
+        <div class="header-row">
+          <div class="heading"><h1>${this._t("Audit entit", "Entity Audit")}</h1><span class="result-count">${rows.length} / ${this._entities.length} ${this._t("entit zobrazeno", "entities shown")}</span></div>
+          <button id="refresh" aria-label="${this._t("Obnovit seznam entit", "Refresh entity list")}">${this._loading ? this._t("Načítám…", "Loading…") : "↻"} <span>${this._t("Obnovit", "Refresh")}</span></button>
+        </div>
+        <div class="ribbon">
+          <label class="search-wrap"><span class="search-icon" aria-hidden="true">⌕</span><input id="search" class="search" type="search" placeholder="${this._t("Hledat název, zařízení, entity_id nebo integraci…", "Search name, device, entity_id or integration…")}" value="${this._escape(this._filter)}" aria-label="${this._t("Hledat entity", "Search entities")}"></label>
+          <button id="toggle-filters" class="filter-toggle" aria-expanded="${this._filtersOpen}">☰ ${this._t("Filtry", "Filters")}</button>
+        </div>
+        <div class="ribbon-controls">
+          <label class="select-wrap"><select id="group-by" aria-label="${this._t("Seskupit podle", "Group by")}">
+            <option value="none" ${this._groupBy === "none" ? "selected" : ""}>${this._t("Bez seskupení", "No grouping")}</option>
+            <option value="device" ${this._groupBy === "device" ? "selected" : ""}>${this._t("Podle zařízení", "By device")}</option>
+            <option value="manufacturer" ${this._groupBy === "manufacturer" ? "selected" : ""}>${this._t("Podle výrobce", "By manufacturer")}</option>
+            <option value="model" ${this._groupBy === "model" ? "selected" : ""}>${this._t("Podle modelu", "By model")}</option>
+            <option value="platform" ${this._groupBy === "platform" ? "selected" : ""}>${this._t("Podle integrace", "By integration")}</option>
+            <option value="area" ${this._groupBy === "area" ? "selected" : ""}>${this._t("Podle oblasti", "By area")}</option>
+            <option value="domain" ${this._groupBy === "domain" ? "selected" : ""}>${this._t("Podle typu entity", "By entity type")}</option>
+          </select></label>
+          <label class="filter"><input id="problems" type="checkbox" ${this._problemOnly ? "checked" : ""}> ${this._t("Jen problémy", "Problems only")}</label>
+        </div>
       </header>
       <main>
         ${this._error ? `<div class="card problem">${this._escape(this._error)}</div>` : ""}
@@ -350,25 +562,16 @@ class EntityAuditPanel extends HTMLElement {
           <div class="stat"><b>${this._entities.filter((e) => e.logging).length}</b>${this._t("auditovaných", "audited")}</div>
           <div class="stat"><b>${problemCount}</b>${this._t("aktuálních problémů", "current problems")}</div>
         </section>
-        <div class="toolbar">
-          <input id="search" class="search" type="search" placeholder="${this._t("Hledat název, zařízení, entity_id nebo integraci…", "Search name, device, entity_id or integration…")}" value="${this._escape(this._filter)}">
-          <select id="group-by" aria-label="${this._t("Seskupit podle", "Group by")}">
-            <option value="none" ${this._groupBy === "none" ? "selected" : ""}>${this._t("Bez seskupení", "No grouping")}</option>
-            <option value="device" ${this._groupBy === "device" ? "selected" : ""}>${this._t("Podle zařízení", "By device")}</option>
-            <option value="manufacturer" ${this._groupBy === "manufacturer" ? "selected" : ""}>${this._t("Podle výrobce", "By manufacturer")}</option>
-            <option value="model" ${this._groupBy === "model" ? "selected" : ""}>${this._t("Podle modelu", "By model")}</option>
-            <option value="platform" ${this._groupBy === "platform" ? "selected" : ""}>${this._t("Podle integrace", "By integration")}</option>
-            <option value="area" ${this._groupBy === "area" ? "selected" : ""}>${this._t("Podle oblasti", "By area")}</option>
-            <option value="domain" ${this._groupBy === "domain" ? "selected" : ""}>${this._t("Podle typu entity", "By entity type")}</option>
-          </select>
-          <label class="filter"><input id="problems" type="checkbox" ${this._problemOnly ? "checked" : ""}> ${this._t("Jen problémy", "Problems only")}</label>
-          <button id="bulk-enable">${this._t("Auditovat zobrazené", "Audit displayed")}</button>
-          <button id="bulk-disable">${this._t("Vypnout audit", "Disable audit")}</button>
-          <button id="export">${this._t("Export CSV", "Export CSV")}</button>
-          <label class="label-size">${this._t("Štítek (mm)", "Label (mm)")} <input id="label-width" type="number" min="20" max="190" step="1" value="${this._labelWidth}" aria-label="${this._t("Šířka štítku v milimetrech", "Label width in millimeters")}"> × <input id="label-height" type="number" min="20" max="280" step="1" value="${this._labelHeight}" aria-label="${this._t("Výška štítku v milimetrech", "Label height in millimeters")}"></label>
-          <button id="print-labels">${this._t("Tisk štítků (PDF)", "Print labels (PDF)")}</button>
-        </div>
-        <div class="filters">
+        ${this._labelPdf ? `<section class="pdf-ready"><span>${this._t("PDF štítků je připraven.", "The label PDF is ready.")}</span><a id="download-label-pdf" href="${this._escape(this._labelPdf.url)}" download="${this._escape(this._labelPdf.filename)}">${this._t("Otevřít nebo uložit PDF", "Open or save PDF")}</a>${navigator.canShare && navigator.share ? `<button id="share-label-pdf">${this._t("Sdílet PDF", "Share PDF")}</button>` : ""}<button id="discard-label-pdf">✕</button></section>` : ""}
+        <section class="filter-panel ${this._filtersOpen ? "open" : ""}">
+          <div class="toolbar">
+            <button id="bulk-enable">${this._t("Auditovat zobrazené", "Audit displayed")}</button>
+            <button id="bulk-disable">${this._t("Vypnout audit", "Disable audit")}</button>
+            <button id="export">${this._t("Export CSV", "Export CSV")}</button>
+            <label class="label-size">${this._t("Štítek (mm)", "Label (mm)")} <input id="label-width" type="number" min="20" max="190" step="1" value="${this._labelWidth}" aria-label="${this._t("Šířka štítku v milimetrech", "Label width in millimeters")}"> × <input id="label-height" type="number" min="20" max="280" step="1" value="${this._labelHeight}" aria-label="${this._t("Výška štítku v milimetrech", "Label height in millimeters")}"></label>
+            <button id="download-labels">${this._t("Vytvořit štítky (PDF)", "Create labels (PDF)")}</button>
+          </div>
+          <div class="filters">
           <select id="device-filter" class="device-filter" aria-label="${this._t("Filtrovat podle zařízení", "Filter by device")}">
             <option value="">${this._t("Všechna zařízení", "All devices")}</option>
             <option value="__none__" ${this._device === "__none__" ? "selected" : ""}>${this._t("Bez zařízení", "No device")}</option>
@@ -402,7 +605,8 @@ class EntityAuditPanel extends HTMLElement {
             <option value="enabled" ${this._audit === "enabled" ? "selected" : ""}>${this._t("Audit zapnutý", "Audit enabled")}</option>
             <option value="disabled" ${this._audit === "disabled" ? "selected" : ""}>${this._t("Audit vypnutý", "Audit disabled")}</option>
           </select>
-        </div>
+          </div>
+        </section>
         <div class="table-wrap">
           <table>
             <thead><tr><th>${this._t("Entita", "Entity")}</th><th>${this._t("Stav", "State")}</th><th>${this._t("Zařízení", "Device")}</th><th>${this._t("Integrace", "Integration")}</th><th>${this._t("Auditovat", "Audit")}</th><th>${this._t("Historie", "History")}</th></tr></thead>
@@ -431,6 +635,10 @@ class EntityAuditPanel extends HTMLElement {
     `;
 
     this.shadowRoot.querySelector("#refresh")?.addEventListener("click", () => this._load());
+    this.shadowRoot.querySelector("#toggle-filters")?.addEventListener("click", () => {
+      this._filtersOpen = !this._filtersOpen;
+      this._render();
+    });
     this.shadowRoot.querySelector("#search")?.addEventListener("input", (event) => {
       this._filter = event.target.value;
       this._render();
@@ -452,7 +660,9 @@ class EntityAuditPanel extends HTMLElement {
     this.shadowRoot.querySelector("#export")?.addEventListener("click", () => this._exportCsv(rows));
     this.shadowRoot.querySelector("#label-width")?.addEventListener("input", (event) => { this._labelWidth = event.target.value; });
     this.shadowRoot.querySelector("#label-height")?.addEventListener("input", (event) => { this._labelHeight = event.target.value; });
-    this.shadowRoot.querySelector("#print-labels")?.addEventListener("click", () => this._printLabels(rows));
+    this.shadowRoot.querySelector("#download-labels")?.addEventListener("click", () => this._downloadLabelsPdf(rows));
+    this.shadowRoot.querySelector("#share-label-pdf")?.addEventListener("click", () => this._shareLabelPdf());
+    this.shadowRoot.querySelector("#discard-label-pdf")?.addEventListener("click", () => { this._revokeLabelPdf(); this._render(); });
     this.shadowRoot.querySelectorAll(".toggle").forEach((input) => input.addEventListener("change", () => this._toggle(rows[Number(input.dataset.index)], input.checked)));
     this.shadowRoot.querySelectorAll(".history-button").forEach((button) => button.addEventListener("click", () => this._open(rows[Number(button.dataset.index)])));
     this.shadowRoot.querySelectorAll(".state-button").forEach((button) => button.addEventListener("click", () => this._showEntity(rows[Number(button.dataset.index)].entity_id)));
@@ -461,6 +671,6 @@ class EntityAuditPanel extends HTMLElement {
   }
 }
 
-if (!customElements.get("entity-audit-panel-v038")) {
-  customElements.define("entity-audit-panel-v038", EntityAuditPanel);
+if (!customElements.get("entity-audit-panel-v039")) {
+  customElements.define("entity-audit-panel-v039", EntityAuditPanel);
 }
