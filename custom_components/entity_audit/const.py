@@ -31,6 +31,8 @@ ACTIVITY_EVENT_TYPES = frozenset(
         "entity_detail_opened",
         "inventory_refreshed",
         "csv_exported",
+        "hacs_csv_exported",
+        "users_csv_exported",
         "labels_pdf_created",
         "labels_pdf_failed",
         "labels_pdf_shared",
@@ -55,5 +57,5 @@ PROBLEM_STATES = {"unavailable", "unknown"}
 PANEL_URL = "/entity_audit/entity-audit-panel.js"
 QR_LIBRARY_URL = "/entity_audit/qrcode.js"
 QR_READER_LIBRARY_URL = "/entity_audit/jsQR.js"
-PANEL_MODULE_URL = f"{PANEL_URL}?v=0.3.17"
-PANEL_ELEMENT = "entity-audit-panel-v0317"
+PANEL_MODULE_URL = f"{PANEL_URL}?v=0.3.18"
+PANEL_ELEMENT = "entity-audit-panel-v0318"

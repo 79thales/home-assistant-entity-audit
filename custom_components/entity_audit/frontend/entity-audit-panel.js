@@ -11,6 +11,16 @@ class EntityAuditPanel extends HTMLElement {
     this._area = "";
     this._domain = "";
     this._audit = "";
+    this._category = "entities";
+    this._hacsRepositories = [];
+    this._hacsAvailable = null;
+    this._hacsLoaded = false;
+    this._hacsLoading = false;
+    this._hacsCategory = "";
+    this._users = [];
+    this._usersLoaded = false;
+    this._usersLoading = false;
+    this._userRole = "";
     this._groupBy = "device";
     this._problemOnly = false;
     this._selected = null;
@@ -92,6 +102,71 @@ class EntityAuditPanel extends HTMLElement {
     }
   }
 
+  async _loadHacs(force = false) {
+    if (!this._hass || this._hacsLoading || (!force && this._hacsLoaded)) return;
+    this._hacsLoading = true;
+    this._categoryError = null;
+    this._render();
+    try {
+      const result = await this._hass.callWS({ type: "entity_audit/list_hacs_repositories" });
+      this._hacsAvailable = Boolean(result.available);
+      this._hacsRepositories = Array.isArray(result.repositories) ? result.repositories : [];
+      this._hacsLoaded = true;
+    } catch (error) {
+      this._categoryError = error.message || String(error);
+    } finally {
+      this._hacsLoading = false;
+      this._render();
+    }
+  }
+
+  async _loadUsers(force = false) {
+    if (!this._hass || this._usersLoading || (!force && this._usersLoaded)) return;
+    this._usersLoading = true;
+    this._categoryError = null;
+    this._render();
+    try {
+      const result = await this._hass.callWS({ type: "entity_audit/list_users" });
+      this._users = Array.isArray(result) ? result : [];
+      this._usersLoaded = true;
+    } catch (error) {
+      this._categoryError = error.message || String(error);
+    } finally {
+      this._usersLoading = false;
+      this._render();
+    }
+  }
+
+  async _setCategory(category) {
+    if (category === this._category) return;
+    this._category = category;
+    this._filter = "";
+    this._selected = null;
+    this._filtersOpen = false;
+    if (category === "hacs") {
+      await this._loadHacs();
+      return;
+    }
+    if (category === "users") {
+      await this._loadUsers();
+      return;
+    }
+    this._render();
+  }
+
+  async _refreshCurrentCategory() {
+    if (this._category === "hacs") {
+      await this._loadHacs(true);
+      return;
+    }
+    if (this._category === "users") {
+      await this._loadUsers(true);
+      return;
+    }
+    this._recordActivity("inventory_refreshed");
+    await this._load();
+  }
+
   async _toggle(entity, enabled) {
     await this._hass.callWS({
       type: "entity_audit/set_logging",
@@ -163,11 +238,23 @@ class EntityAuditPanel extends HTMLElement {
     return `"${text.replace(/"/g, '""')}"`;
   }
 
-  _exportCsv(rows) {
-    const headers = ["name", "entity_id", "domain", "device", "manufacturer", "model", "area", "ip_address", "mac_address", "integration", "state", "problem", "audited", "last_changed"];
+  _downloadCsv(prefix, headers, rows) {
     const lines = [headers.map((value) => this._csvCell(value)).join(";")];
-    for (const entity of rows) {
-      lines.push([
+    for (const row of rows) lines.push(row.map((value) => this._csvCell(value)).join(";"));
+    const blob = new Blob(["\uFEFF", lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${prefix}-${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  _exportCsv(rows) {
+    this._downloadCsv(
+      "entity-audit",
+      ["name", "entity_id", "domain", "device", "manufacturer", "model", "area", "ip_address", "mac_address", "integration", "state", "problem", "audited", "last_changed"],
+      rows.map((entity) => [
         entity.name,
         entity.entity_id,
         entity.domain,
@@ -182,16 +269,46 @@ class EntityAuditPanel extends HTMLElement {
         entity.problem,
         entity.logging ? "true" : "false",
         entity.last_changed,
-      ].map((value) => this._csvCell(value)).join(";"));
-    }
-    const blob = new Blob(["\uFEFF", lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `entity-audit-${new Date().toISOString().slice(0, 10)}.csv`;
-    anchor.click();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+      ])
+    );
     this._recordActivity("csv_exported", "info", String(rows.length));
+  }
+
+  _exportHacsCsv(rows) {
+    this._downloadCsv(
+      "entity-audit-hacs",
+      ["name", "repository", "category", "domain", "description", "installed_version", "available_version", "update_available", "restart_required"],
+      rows.map((repository) => [
+        repository.name,
+        repository.repository,
+        repository.category,
+        repository.domain,
+        repository.description,
+        repository.installed_version,
+        repository.available_version,
+        repository.update_available ? "true" : "false",
+        repository.restart_required ? "true" : "false",
+      ])
+    );
+    this._recordActivity("hacs_csv_exported", "info", String(rows.length));
+  }
+
+  _exportUsersCsv(rows) {
+    this._downloadCsv(
+      "entity-audit-users",
+      ["name", "role", "access", "groups", "permission_policy", "active", "local_only", "system_generated"],
+      rows.map((user) => [
+        user.name,
+        user.role,
+        user.access,
+        (user.groups || []).join(" | "),
+        user.permission_policy,
+        user.active ? "true" : "false",
+        user.local_only ? "true" : "false",
+        user.system_generated ? "true" : "false",
+      ])
+    );
+    this._recordActivity("users_csv_exported", "info", String(rows.length));
   }
 
   _recordActivity(eventType, level = "info", detail = null) {
@@ -979,8 +1096,170 @@ class EntityAuditPanel extends HTMLElement {
     return [...groups.values()].sort((a, b) => a.label.localeCompare(b.label));
   }
 
+  _renderSecondaryCategory() {
+    const isHacs = this._category === "hacs";
+    const query = this._filter.toLocaleLowerCase();
+    const allRows = isHacs ? this._hacsRepositories : this._users;
+    const loading = isHacs ? this._hacsLoading : this._usersLoading;
+    const categoryOptions = isHacs
+      ? [...new Set(this._hacsRepositories.map((item) => item.category).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b))
+      : [];
+    const rows = allRows.filter((item) => {
+      const matches = !query || (isHacs
+        ? `${item.name || ""} ${item.repository || ""} ${item.domain || ""} ${item.description || ""} ${item.category || ""}`
+        : `${item.name || ""} ${item.role || ""} ${item.access || ""} ${(item.groups || []).join(" ")}`
+      ).toLocaleLowerCase().includes(query);
+      return matches && (isHacs
+        ? (!this._hacsCategory || item.category === this._hacsCategory)
+        : (!this._userRole || item.role_key === this._userRole));
+    });
+    const updateCount = this._hacsRepositories.filter((item) => item.update_available).length;
+    const activeUsers = this._users.filter((item) => item.active).length;
+    const administrators = this._users.filter((item) => item.role_key !== "user").length;
+    const placeholder = isHacs
+      ? "Search HACS repositories…"
+      : "Search user, role or group…";
+    const title = isHacs ? "HACS repositories" : "Users & permissions";
+    const status = (repository) => [
+      repository.update_available ? "Update available" : "Installed",
+      repository.restart_required ? "Restart required" : "",
+    ].filter(Boolean).join(" · ");
+    const table = isHacs ? `
+      <table>
+        <thead><tr><th>Repository</th><th>Category</th><th>Domain</th><th>Installed</th><th>Available</th><th>Status</th></tr></thead>
+        <tbody>${rows.map((repository) => `<tr>
+          <td><div class="name">${this._escape(repository.name)}</div><div class="muted">${this._escape(repository.repository || "—")}</div>${repository.description ? `<div class="muted">${this._escape(repository.description)}</div>` : ""}</td>
+          <td>${this._escape(repository.category || "—")}</td>
+          <td>${this._escape(repository.domain || "—")}</td>
+          <td>${this._escape(repository.installed_version || "—")}</td>
+          <td>${this._escape(repository.available_version || "—")}</td>
+          <td><span class="badge ${repository.update_available ? "update" : ""}">${this._escape(status(repository))}</span></td>
+        </tr>`).join("") || `<tr><td class="empty" colspan="6">${this._hacsAvailable === false ? "HACS is not available or has not finished loading." : "No matching HACS repositories"}</td></tr>`}</tbody>
+      </table>` : `
+      <table>
+        <thead><tr><th>User</th><th>Role</th><th>Access</th><th>Groups</th><th>Status</th><th>Scope</th></tr></thead>
+        <tbody>${rows.map((user) => `<tr>
+          <td><div class="name">${this._escape(user.name)}</div>${user.system_generated ? `<div class="muted">System-generated account</div>` : ""}</td>
+          <td>${this._escape(user.role)}</td>
+          <td>${this._escape(user.access)}</td>
+          <td>${this._escape((user.groups || []).join(" · ") || "—")}</td>
+          <td><span class="badge ${user.active ? "" : "inactive"}">${user.active ? "Active" : "Inactive"}</span></td>
+          <td>${user.local_only ? "Local only" : "Network access"}</td>
+        </tr>`).join("") || `<tr><td class="empty" colspan="6">No matching users</td></tr>`}</tbody>
+      </table>`;
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display:block; min-height:100vh; color:var(--primary-text-color); background:var(--primary-background-color); font-family:Roboto, "Noto Sans", Arial, sans-serif; color-scheme:light dark; }
+        * { box-sizing:border-box; }
+        ha-top-app-bar-fixed { display:block; height:100vh; }
+        .system-title { font-size:inherit; font-weight:inherit; }
+        .system-action { width:48px; min-width:48px; padding:0; border:0; color:var(--app-header-text-color, white); background:transparent; font-size:25px; }
+        .system-sub-row, .ribbon-controls { display:flex; align-items:center; gap:10px; }
+        .system-sub-row { width:100%; min-height:58px; padding:7px 16px; color:var(--primary-text-color); background:var(--primary-background-color); border-bottom:1px solid var(--divider-color); }
+        button, input, select { font:inherit; }
+        button { min-height:44px; border:1px solid var(--divider-color); border-radius:9px; padding:9px 13px; cursor:pointer; font-weight:600; color:var(--primary-text-color); background:var(--card-background-color); }
+        button:focus-visible, input:focus-visible, select:focus-visible { outline:3px solid var(--primary-color); outline-offset:2px; }
+        .search-wrap { flex:1; min-width:180px; min-height:44px; display:flex; align-items:center; gap:9px; padding:0 13px; border:1px solid var(--divider-color); border-radius:11px; color:var(--primary-text-color); background:var(--card-background-color); }
+        .search-icon { font-size:24px; line-height:1; opacity:.9; }
+        .search { width:100%; min-width:0; border:0; outline:0; color:inherit; background:transparent; font-size:16px; }
+        .filter-toggle { white-space:nowrap; }
+        .select-wrap { position:relative; min-width:200px; }
+        .select-wrap select, .filters select { width:100%; min-height:44px; appearance:none; -webkit-appearance:none; border:1px solid var(--divider-color); border-radius:9px; padding:10px 38px 10px 13px; color:var(--primary-text-color); background-color:var(--card-background-color); background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='10' viewBox='0 0 16 10'%3E%3Cpath fill='%238fa4bf' d='m1 1 7 7 7-7' stroke='%238fa4bf' stroke-width='2'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 13px center; }
+        main { max-width:1400px; margin:auto; padding:20px; }
+        .stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
+        .stat, .card, .filter-panel { background:var(--card-background-color); border-radius:12px; box-shadow:var(--ha-card-box-shadow); padding:16px; }
+        .stat b { font-size:28px; line-height:1.05; display:block; }
+        .stat { font-size:14px; font-weight:500; }
+        .filter-panel { margin-bottom:12px; }
+        .toolbar { display:flex; gap:10px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
+        .filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px; }
+        .privacy-note { color:var(--secondary-text-color); font-size:13px; line-height:1.45; margin:0; }
+        .table-wrap { overflow:auto; background:var(--card-background-color); border-radius:12px; box-shadow:var(--ha-card-box-shadow); }
+        table { width:100%; border-collapse:collapse; }
+        th, td { padding:12px 13px; text-align:left; border-bottom:1px solid var(--divider-color); vertical-align:top; }
+        th { font-size:12px; color:var(--secondary-text-color); text-transform:uppercase; letter-spacing:.03em; position:sticky; top:0; background:var(--card-background-color); }
+        tr:hover td { background:var(--secondary-background-color); }
+        .name { font-size:15px; font-weight:700; overflow-wrap:anywhere; }
+        .muted { color:var(--secondary-text-color); font-size:13px; line-height:1.35; overflow-wrap:anywhere; }
+        .badge { display:inline-block; border-radius:999px; padding:5px 9px; font-size:13px; font-weight:600; background:var(--secondary-background-color); white-space:nowrap; }
+        .update { color:var(--primary-color); }
+        .inactive { color:var(--error-color); }
+        .empty { text-align:center; padding:35px; color:var(--secondary-text-color); }
+        @media(max-width:700px) {
+          .system-sub-row { display:grid; grid-template-columns:minmax(0,1fr) auto; padding:7px 10px; }
+          .ribbon-controls { grid-column:1 / -1; overflow-x:auto; padding-bottom:1px; }
+          .ribbon-controls .select-wrap { min-width:185px; }
+          .stats { grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-bottom:12px; }
+          .stat { min-height:78px; padding:12px 9px; font-size:12px; overflow-wrap:anywhere; }
+          .stat b { font-size:24px; }
+          main { padding:12px; }
+          .filter-panel { padding:12px; }
+          .filter-panel:not(.open) { display:none; }
+          .toolbar button { width:100%; }
+          .filters { grid-template-columns:1fr; }
+          th:nth-child(3), td:nth-child(3), th:nth-child(4), td:nth-child(4) { display:none; }
+        }
+      </style>
+      <ha-top-app-bar-fixed ${this._narrow ? "narrow" : ""}>
+        <span slot="title" class="system-title">Entity Audit</span>
+        <button slot="actionItems" id="refresh" class="system-action" title="Refresh ${title}" aria-label="Refresh ${title}">${loading ? "…" : "↻"}</button>
+        <div slot="subRow" class="system-sub-row">
+          <label class="search-wrap"><span class="search-icon" aria-hidden="true">⌕</span><input id="search" class="search" type="search" placeholder="${placeholder}" value="${this._escape(this._filter)}" aria-label="Search ${title}"></label>
+          <button id="toggle-filters" class="filter-toggle" aria-expanded="${this._filtersOpen}">☰ Filters</button>
+          <div class="ribbon-controls">
+            <label class="select-wrap"><select id="category" aria-label="Category">
+              <option value="entities">Entities</option>
+              <option value="hacs" ${isHacs ? "selected" : ""}>HACS repositories</option>
+              <option value="users" ${!isHacs ? "selected" : ""}>Users &amp; permissions</option>
+            </select></label>
+          </div>
+        </div>
+        <main>
+          ${this._categoryError ? `<div class="card inactive">${this._escape(this._categoryError)}</div>` : ""}
+          <section class="stats">
+            ${isHacs ? `<div class="stat"><b>${this._hacsRepositories.length}</b>installed repositories</div><div class="stat"><b>${categoryOptions.length}</b>HACS categories</div><div class="stat"><b>${updateCount}</b>updates available</div>` : `<div class="stat"><b>${this._users.length}</b>users</div><div class="stat"><b>${administrators}</b>owners and administrators</div><div class="stat"><b>${activeUsers}</b>active users</div>`}
+          </section>
+          <section class="filter-panel ${this._filtersOpen ? "open" : ""}">
+            <div class="toolbar"><button id="export-category" ${rows.length ? "" : "disabled"}>${isHacs ? "Export HACS CSV" : "Export users CSV"}</button></div>
+            <div class="filters">
+              ${isHacs ? `<select id="hacs-category-filter" aria-label="Filter by HACS category"><option value="">All HACS categories</option>${categoryOptions.map((category) => `<option value="${this._escape(category)}" ${this._hacsCategory === category ? "selected" : ""}>${this._escape(category)}</option>`).join("")}</select>` : `<select id="user-role-filter" aria-label="Filter by role"><option value="">All roles</option><option value="owner" ${this._userRole === "owner" ? "selected" : ""}>Owners</option><option value="administrator" ${this._userRole === "administrator" ? "selected" : ""}>Administrators</option><option value="user" ${this._userRole === "user" ? "selected" : ""}>Users</option></select>`}
+            </div>
+            ${isHacs ? "" : `<p class="privacy-note">The export contains account status, role, and group membership only. It never includes passwords, tokens, or authentication credentials.</p>`}
+          </section>
+          <div class="table-wrap">${table}</div>
+        </main>
+      </ha-top-app-bar-fixed>
+    `;
+
+    this.shadowRoot.querySelector("#refresh")?.addEventListener("click", () => this._refreshCurrentCategory());
+    this.shadowRoot.querySelector("#toggle-filters")?.addEventListener("click", () => {
+      this._filtersOpen = !this._filtersOpen;
+      this._render();
+    });
+    this.shadowRoot.querySelector("#search")?.addEventListener("input", (event) => {
+      this._filter = event.target.value;
+      this._render();
+      const search = this.shadowRoot.querySelector("#search");
+      search?.focus();
+      search?.setSelectionRange(this._filter.length, this._filter.length);
+    });
+    this.shadowRoot.querySelector("#category")?.addEventListener("change", (event) => this._setCategory(event.target.value));
+    this.shadowRoot.querySelector("#hacs-category-filter")?.addEventListener("change", (event) => { this._hacsCategory = event.target.value; this._render(); });
+    this.shadowRoot.querySelector("#user-role-filter")?.addEventListener("change", (event) => { this._userRole = event.target.value; this._render(); });
+    this.shadowRoot.querySelector("#export-category")?.addEventListener("click", () => {
+      if (isHacs) this._exportHacsCsv(rows);
+      else this._exportUsersCsv(rows);
+    });
+  }
+
   _render() {
     if (!this.shadowRoot) return;
+    if (this._category !== "entities") {
+      this._renderSecondaryCategory();
+      return;
+    }
     const query = this._filter.toLocaleLowerCase();
     const devices = [...new Map(
       this._entities
@@ -1129,6 +1408,11 @@ class EntityAuditPanel extends HTMLElement {
           <label class="search-wrap"><span class="search-icon" aria-hidden="true">⌕</span><input id="search" class="search" type="search" placeholder="${"Search name, device, entity_id or integration…"}" value="${this._escape(this._filter)}" aria-label="${"Search entities"}"></label>
           <button id="toggle-filters" class="filter-toggle" aria-expanded="${this._filtersOpen}">☰ ${"Filters"}</button>
           <div class="ribbon-controls">
+            <label class="select-wrap"><select id="category" aria-label="Category">
+              <option value="entities" selected>Entities</option>
+              <option value="hacs">HACS repositories</option>
+              <option value="users">Users &amp; permissions</option>
+            </select></label>
             <label class="select-wrap"><select id="group-by" aria-label="${"Group by"}">
               <option value="none" ${this._groupBy === "none" ? "selected" : ""}>${"No grouping"}</option>
               <option value="device" ${this._groupBy === "device" ? "selected" : ""}>${"By device"}</option>
@@ -1221,7 +1505,7 @@ class EntityAuditPanel extends HTMLElement {
     `;
 
     this.shadowRoot.querySelector("#open-scanner")?.addEventListener("click", () => this._startScanner());
-    this.shadowRoot.querySelector("#refresh")?.addEventListener("click", () => { this._recordActivity("inventory_refreshed"); this._load(); });
+    this.shadowRoot.querySelector("#refresh")?.addEventListener("click", () => this._refreshCurrentCategory());
     this.shadowRoot.querySelector("#toggle-filters")?.addEventListener("click", () => {
       this._filtersOpen = !this._filtersOpen;
       this._render();
@@ -1241,6 +1525,7 @@ class EntityAuditPanel extends HTMLElement {
     this.shadowRoot.querySelector("#area-filter")?.addEventListener("change", (event) => { this._area = event.target.value; this._render(); });
     this.shadowRoot.querySelector("#domain-filter")?.addEventListener("change", (event) => { this._domain = event.target.value; this._render(); });
     this.shadowRoot.querySelector("#audit-filter")?.addEventListener("change", (event) => { this._audit = event.target.value; this._render(); });
+    this.shadowRoot.querySelector("#category")?.addEventListener("change", (event) => this._setCategory(event.target.value));
     this.shadowRoot.querySelector("#group-by")?.addEventListener("change", (event) => { this._groupBy = event.target.value; this._render(); });
     this.shadowRoot.querySelector("#bulk-enable")?.addEventListener("click", () => this._bulkSet(rows, true));
     this.shadowRoot.querySelector("#bulk-disable")?.addEventListener("click", () => this._bulkSet(rows, false));
@@ -1257,6 +1542,6 @@ class EntityAuditPanel extends HTMLElement {
   }
 }
 
-if (!customElements.get("entity-audit-panel-v0317")) {
-  customElements.define("entity-audit-panel-v0317", EntityAuditPanel);
+if (!customElements.get("entity-audit-panel-v0318")) {
+  customElements.define("entity-audit-panel-v0318", EntityAuditPanel);
 }

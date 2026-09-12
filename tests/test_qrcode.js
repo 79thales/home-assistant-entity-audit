@@ -113,6 +113,48 @@ if (panel._matchScannedDevice(parsed) !== null) {
   throw new Error("Ambiguous IP address was incorrectly matched to a device");
 }
 
+const catalogPanel = new global.EntityAuditPanel();
+catalogPanel._category = "hacs";
+catalogPanel._hacsAvailable = true;
+catalogPanel._hacsRepositories = [{
+  name: "Example HACS integration",
+  repository: "example/home-assistant-integration",
+  category: "integration",
+  domain: "example",
+  description: "An example repository",
+  installed_version: "1.0.0",
+  available_version: "1.1.0",
+  update_available: true,
+  restart_required: false,
+}];
+catalogPanel._renderSecondaryCategory();
+if (!catalogPanel.shadowRoot.innerHTML.includes("Export HACS CSV")) {
+  throw new Error("HACS category did not render its CSV export");
+}
+if (!catalogPanel.shadowRoot.innerHTML.includes("Example HACS integration")) {
+  throw new Error("HACS category did not render repositories");
+}
+
+catalogPanel._category = "users";
+catalogPanel._users = [{
+  name: "Example administrator",
+  role_key: "administrator",
+  role: "Administrator",
+  access: "Full access",
+  groups: ["Administrators"],
+  permission_policy: '[{"group":"Administrators","policy":{}}]',
+  active: true,
+  local_only: false,
+  system_generated: false,
+}];
+catalogPanel._renderSecondaryCategory();
+if (!catalogPanel.shadowRoot.innerHTML.includes("Export users CSV")) {
+  throw new Error("Users category did not render its CSV export");
+}
+if (!catalogPanel.shadowRoot.innerHTML.includes("Example administrator")) {
+  throw new Error("Users category did not render users");
+}
+
 for (const invalidPayload of ["not-json", "{}", '{"name":"Only a name"}']) {
   let rejected = false;
   try {

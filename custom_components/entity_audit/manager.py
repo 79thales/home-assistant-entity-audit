@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from typing import Any
 
@@ -297,6 +298,118 @@ class EntityAuditManager:
                 }
             )
         return sorted(result, key=lambda item: (item["name"].casefold(), item["entity_id"]))
+
+    @callback
+    def get_hacs_repositories(self) -> dict[str, Any]:
+        """Return installed HACS repositories when HACS is available.
+
+        HACS is optional, so this uses only the already-loaded HACS runtime data
+        and never imports HACS or reads its private storage files.
+        """
+        hacs = self.hass.data.get("hacs")
+        repositories = getattr(hacs, "repositories", None)
+        if repositories is None:
+            return {"available": False, "repositories": []}
+
+        try:
+            downloaded = repositories.list_downloaded
+        except (AttributeError, TypeError):
+            return {"available": False, "repositories": []}
+
+        result: list[dict[str, Any]] = []
+        for repository in downloaded:
+            data = getattr(repository, "data", None)
+            if data is None:
+                continue
+            category = getattr(data, "category", "unknown")
+            category = str(getattr(category, "value", category))
+            manifest = getattr(repository, "repository_manifest", None)
+            title = (
+                getattr(manifest, "name", None)
+                or getattr(data, "manifest_name", None)
+                or getattr(data, "domain", None)
+                or getattr(data, "full_name", None)
+                or "Unknown repository"
+            )
+            result.append(
+                {
+                    "name": str(title),
+                    "repository": getattr(data, "full_name", None),
+                    "category": category,
+                    "domain": getattr(data, "domain", None),
+                    "description": getattr(data, "description", None),
+                    "installed_version": getattr(data, "installed_version", None)
+                    or getattr(data, "installed_commit", None),
+                    "available_version": getattr(data, "last_version", None)
+                    or getattr(data, "selected_tag", None),
+                    "update_available": bool(getattr(data, "new", False)),
+                    "restart_required": bool(
+                        getattr(repository, "pending_restart", False)
+                    ),
+                }
+            )
+        return {
+            "available": True,
+            "repositories": sorted(
+                result,
+                key=lambda item: (item["name"].casefold(), item["repository"] or ""),
+            ),
+        }
+
+    async def async_get_users(self) -> list[dict[str, Any]]:
+        """Return administrator-safe user role and group information.
+
+        Passwords, access tokens, refresh tokens, credential data, and detailed
+        auth-provider data are deliberately excluded.
+        """
+        users = await self.hass.auth.async_get_users()
+        result: list[dict[str, Any]] = []
+        for user in users:
+            group_details = [
+                {
+                    "group": str(getattr(group, "name", None) or group.id),
+                    "policy": getattr(group, "policy", {}),
+                }
+                for group in user.groups
+            ]
+            group_details.sort(key=lambda item: item["group"].casefold())
+            groups = [item["group"] for item in group_details]
+            if user.is_owner:
+                role_key = "owner"
+                role = "Owner"
+                access = "Full access"
+            elif user.is_admin:
+                role_key = "administrator"
+                role = "Administrator"
+                access = "Full access"
+            elif groups:
+                role_key = "user"
+                role = "User"
+                access = "Custom group policy"
+            else:
+                role_key = "user"
+                role = "User"
+                access = "Standard user access"
+            result.append(
+                {
+                    "name": str(user.name or "Unnamed user"),
+                    "role_key": role_key,
+                    "role": role,
+                    "access": access,
+                    "groups": groups,
+                    "permission_policy": json.dumps(
+                        group_details,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        default=str,
+                    ),
+                    "active": user.is_active,
+                    "local_only": user.local_only,
+                    "system_generated": user.system_generated,
+                }
+            )
+        return sorted(result, key=lambda item: item["name"].casefold())
 
     def _data(self) -> dict[str, Any]:
         return {

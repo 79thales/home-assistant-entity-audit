@@ -14,6 +14,7 @@ Entity Audit is a HACS-compatible custom integration that gives administrators o
 - filters by device, manufacturer, model, integration, area, entity domain, problem, and audit status;
 - enables or disables auditing in bulk for the currently filtered entities;
 - exports the currently filtered entity list to a UTF-8 CSV file, including available IP and MAC addresses;
+- adds separate HACS repositories and users & permissions categories, each with independent filters and a UTF-8 CSV export;
 - creates a downloadable A4 PDF label sheet for the currently filtered devices with an IP address, deduplicated by IP address, including manufacturer, area, IP, and MAC address; configure the label dimensions and variant in the integration settings, then open, save, print, or share the generated PDF;
 - offers text-only, text-with-QR, and QR-only label variants; QR payloads contain the complete label data and are generated locally in the browser;
 - scans Entity Audit QR labels with the device camera or an existing photo/file, displays a virtual label, and matches it to the current inventory by MAC or IP address; live-camera startup waits up to an editable 5-second default before offering the photo/file fallback;
@@ -48,6 +49,8 @@ Until the repository is accepted into the HACS default catalog, add `https://git
 The default retention is 30 days and 500 events per entity. The enabled-entity list and audit history are stored locally in Home Assistant's `.storage/entity_audit.storage` file. Each audit record contains a timestamp, event category, and old/new state values; entity attributes are not stored in audit history. For the current inventory display only, an IP address may be shown when Home Assistant already supplies a literal IP in an entity attribute, a device configuration URL, or one of the common address fields (`ip_address`, `ip`, `host`, or `address`) in the integration's config entry. A MAC address may be shown when it exists in the device registry. No hostname lookup or network discovery is performed. The integration does not send inventory data to an external service.
 
 The action and error history is enabled by default and is also stored locally. It uses the same configurable age retention as entity auditing and keeps at most 1,000 records. Each record contains a timestamp, a fixed action/error type, a severity, and—where useful—an entity ID, device ID, count, browser error name, or non-identifying camera-environment flags (protocol, secure-context/API availability, and visibility). It does not retain state attributes, QR payloads, photos, camera video, server address, IP or MAC addresses, tokens, or credentials.
+
+The optional HACS category reads only the installed repository list that HACS has already loaded in memory; it does not import HACS, access its storage, or expose its GitHub token. The administrator-only users & permissions category and its CSV export include user name, account status, owner/administrator role, access summary, group membership, and the associated Home Assistant group policy. They never include passwords, authentication credentials, access tokens, refresh tokens, or detailed auth-provider data.
 
 ## Settings and logs
 

@@ -166,6 +166,41 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn("manager.get_diagnostics()", diagnostics)
         self.assertIn('"action_and_error_history"', manager)
 
+    def test_hacs_category_is_optional_and_has_a_filtered_csv_export(self) -> None:
+        frontend = FRONTEND_FILE.read_text(encoding="utf-8")
+        manager = MANAGER_FILE.read_text(encoding="utf-8")
+        websocket = WEBSOCKET_FILE.read_text(encoding="utf-8")
+
+        self.assertIn('value="hacs"', frontend)
+        self.assertIn("HACS repositories", frontend)
+        self.assertIn("_exportHacsCsv", frontend)
+        self.assertIn("entity-audit-hacs", frontend)
+        self.assertIn("hacs-category-filter", frontend)
+        self.assertIn("def get_hacs_repositories", manager)
+        self.assertIn('self.hass.data.get("hacs")', manager)
+        self.assertIn("repositories.list_downloaded", manager)
+        self.assertNotIn("import hacs", manager)
+        self.assertIn('f"{DOMAIN}/list_hacs_repositories"', websocket)
+
+    def test_users_category_uses_supported_auth_api_without_secrets(self) -> None:
+        frontend = FRONTEND_FILE.read_text(encoding="utf-8")
+        manager = MANAGER_FILE.read_text(encoding="utf-8")
+        websocket = WEBSOCKET_FILE.read_text(encoding="utf-8")
+
+        self.assertIn('value="users"', frontend)
+        self.assertIn("Users & permissions", frontend)
+        self.assertIn("_exportUsersCsv", frontend)
+        self.assertIn("entity-audit-users", frontend)
+        self.assertIn("user-role-filter", frontend)
+        self.assertIn("permission_policy", frontend)
+        self.assertIn("async def async_get_users", manager)
+        self.assertIn("await self.hass.auth.async_get_users()", manager)
+        self.assertIn('"permission_policy": json.dumps(', manager)
+        self.assertIn('"policy": getattr(group, "policy", {})', manager)
+        self.assertNotIn("user.credentials", manager)
+        self.assertNotIn("user.refresh_tokens", manager)
+        self.assertIn('f"{DOMAIN}/list_users"', websocket)
+
     def test_panel_and_config_flow_are_english_only(self) -> None:
         frontend = FRONTEND_FILE.read_text(encoding="utf-8")
         translations = json.loads(TRANSLATIONS_EN_FILE.read_text(encoding="utf-8"))

@@ -18,6 +18,8 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_set_logging)
     websocket_api.async_register_command(hass, ws_set_logging_bulk)
     websocket_api.async_register_command(hass, ws_clear_history)
+    websocket_api.async_register_command(hass, ws_list_hacs_repositories)
+    websocket_api.async_register_command(hass, ws_list_users)
     websocket_api.async_register_command(hass, ws_get_settings)
     websocket_api.async_register_command(hass, ws_log_activity)
 
@@ -94,6 +96,24 @@ async def ws_clear_history(hass, connection, msg) -> None:
     """Clear an entity's records."""
     _manager(hass).clear_history(msg["entity_id"])
     connection.send_result(msg["id"], {"success": True})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/list_hacs_repositories"}
+)
+@websocket_api.async_response
+async def ws_list_hacs_repositories(hass, connection, msg) -> None:
+    """List installed repositories tracked by HACS when it is available."""
+    connection.send_result(msg["id"], _manager(hass).get_hacs_repositories())
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/list_users"})
+@websocket_api.async_response
+async def ws_list_users(hass, connection, msg) -> None:
+    """List Home Assistant users without authentication secrets."""
+    connection.send_result(msg["id"], await _manager(hass).async_get_users())
 
 
 @websocket_api.require_admin
