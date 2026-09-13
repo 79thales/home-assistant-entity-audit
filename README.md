@@ -17,7 +17,7 @@ Entity Audit is a HACS-compatible custom integration that gives administrators o
 - adds separate HACS repositories and users & permissions categories, each with independent filters and a UTF-8 CSV export;
 - adds separate Automations and Scripts categories with runtime status and state filters; item names open their native Home Assistant editor;
 - exports the currently filtered automation or script inventory as UTF-8 CSV or sanitized YAML; automation exports identify the current enabled, disabled, unavailable, or registry-disabled status;
-- exports a safe `configuration.yaml` include snippet separately and can create one ZIP package containing all available `automations.yaml`, `scripts.yaml`, and the same include snippet;
+- exports a safe `configuration.yaml` include snippet separately and can create a read-only configuration-backup ZIP with validated `automations.yaml` and `scripts.yaml`, machine-readable automation states, dependency diagnostics, and runtime inventories;
 - creates a downloadable A4 PDF label sheet for the currently filtered devices with an IP address, deduplicated by IP address, including manufacturer, area, IP, and MAC address; configure the label dimensions and variant in the integration settings, then open, save, print, or share the generated PDF;
 - offers text-only, text-with-QR, and QR-only label variants; QR payloads contain the complete label data and are generated locally in the browser;
 - scans Entity Audit QR labels with the device camera or an existing photo/file, displays a virtual label, and matches it to the current inventory by MAC or IP address; live-camera startup waits up to an editable 5-second default before offering the photo/file fallback;
@@ -55,7 +55,53 @@ The action and error history is enabled by default and is also stored locally. I
 
 The optional HACS category reads only the installed repository list that HACS has already loaded in memory; it does not import HACS, access its storage, or expose its GitHub token. The administrator-only users & permissions category and its CSV export include user name, account status, owner/administrator role, access summary, group membership, and the associated Home Assistant group policy. They never include passwords, authentication credentials, access tokens, refresh tokens, or detailed auth-provider data.
 
-The administrator-only Automations and Scripts categories list current runtime state and entity-registry metadata. Clicking an item name opens its native Home Assistant editor when Home Assistant provides an editor ID; registry-only entries fall back to the entity detail dialog. Automation CSV exports include a point-in-time enabled/disabled status; automation YAML snapshots add the same status as a comment without changing the configuration payload. YAML exports explicitly request the displayed items through Home Assistant's own administrator-only `automation/config` and `script/config` WebSocket commands. The separate `configuration.yaml` download and the all-items ZIP both contain a safe include snippet alongside `automations.yaml`, `scripts.yaml`, and `README.txt`; neither is a replacement for the complete server configuration. Entity Audit does not read `configuration.yaml`, included YAML files, or Home Assistant's private automation storage. Before a YAML snapshot is downloaded, values under sensitive keys such as `password`, `token`, `secret`, `api_key`, `authorization`, `cookie`, or `session` are replaced with `REDACTED`. Review a snapshot before using it as configuration. For a complete Home Assistant configuration backup, use Home Assistant Backups and your normal configuration-file workflow.
+The administrator-only Automations and Scripts categories list current runtime state and entity-registry metadata. Clicking an item name opens its native Home Assistant editor when Home Assistant provides an editor ID; registry-only entries fall back to the entity detail dialog. Automation CSV exports include a point-in-time enabled/disabled status. YAML exports explicitly request the displayed items through Home Assistant's own administrator-only `automation/config` and `script/config` WebSocket commands. Entity Audit does not read `configuration.yaml`, included YAML files, or Home Assistant's private automation storage. Before configuration is exported, values under sensitive keys such as `password`, `token`, `secret`, `api_key`, `authorization`, `cookie`, `session`, `credential`, `oauth`, or `webhook_id` are replaced with `<REDACTED>`. Obvious credential-bearing strings such as Basic/Bearer headers, private-key blocks, webhook URLs, and URL credentials are also redacted. Review an export before using it as configuration or sharing it.
+
+## Configuration backup export
+
+**Export configuration backup (ZIP)** creates one administrator-only, read-only snapshot. It refreshes the runtime inventory and then produces a stable, UTF-8 ZIP layout such as:
+
+```text
+entity-audit-backup-YYYY-MM-DD_HH-MM/
+├── README.md
+├── manifest.json
+├── restore/
+│   ├── automations.yaml
+│   ├── scripts.yaml
+│   ├── helpers.yaml
+│   └── configuration_include.yaml
+├── inventory/
+│   ├── entities.csv
+│   ├── devices.csv
+│   ├── areas.csv
+│   ├── integrations.csv
+│   └── services.csv
+├── context/
+│   ├── dependencies.yaml
+│   ├── automations.json
+│   ├── scripts.json
+│   ├── automation_states.json
+│   └── home_assistant.json
+└── diagnostics/
+    ├── validation.txt
+    ├── validation.json
+    ├── missing_entities.yaml
+    ├── missing_services.yaml
+    ├── possible_versions.yaml
+    └── possible_conflicts.yaml
+```
+
+`restore/automations.yaml` has a YAML list at its top level and preserves the configuration IDs returned by Home Assistant. `restore/scripts.yaml` is a YAML mapping keyed by script ID. The export validates YAML parsing, the top-level structures, duplicate YAML keys, duplicate automation IDs, duplicate aliases, and duplicate script keys before creating the ZIP. `manifest.json` records format version, versions, content counts, and the validation outcome. A validation failure is recorded as `backup_valid: false`; the ZIP is still created when possible so that diagnostics are available.
+
+`context/automation_states.json` is the machine-readable point-in-time record of enabled and disabled automations. The YAML status comments are informational only and do not alter Home Assistant configuration. The export preserves the original configuration values delivered by the public Home Assistant API, except for the explicit sensitive-value redaction described above; Jinja templates are never evaluated or rewritten.
+
+`context/dependencies.yaml`, per-object indexes, and the diagnostics files identify static entity, service, device, area, script, scene, automation, and helper references. The scanner also records dynamic template references that cannot safely be resolved statically. Missing entity and service reports are therefore diagnostics, not automatic fixes. Possible version and conflict reports are informational and never disable, enable, delete, reload, or otherwise change configuration.
+
+The public runtime API does not reliably identify whether an automation or script came from the UI, `automations.yaml`, a package, or another included YAML file. For that reason, the object indexes use `managed_by: unknown` and `source: null` when provenance is unavailable; Entity Audit does not guess. `helpers.yaml` contains an informational runtime inventory and explicitly marks helpers as non-restorable unless original helper configuration is available through a supported API.
+
+The ZIP is intended for careful manual recovery and configuration review. It never reloads configuration, changes an entity, turns an automation on or off, edits a registry, or reads private Home Assistant storage. Restore only after making a full Home Assistant backup, reviewing `diagnostics/validation.txt`, adapting `restore/configuration_include.yaml` to your own layout, checking configuration, and deliberately applying the enabled/disabled states in `context/automation_states.json`.
+
+This package is an **Entity Audit Configuration Backup & Diagnostic Snapshot**, not a complete Home Assistant backup. It does not include dashboards, config entries, add-ons, databases, secret files, credential stores, OAuth token stores, or arbitrary configuration files. Known sensitive values are redacted, but Backup mode can still contain real entity IDs, names, areas, IP addresses, MAC addresses, and non-sensitive current states. Do not share it publicly without reviewing its contents.
 
 ## Settings and logs
 

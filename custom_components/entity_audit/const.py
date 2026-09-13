@@ -1,6 +1,8 @@
 """Constants for Entity Audit."""
 
 DOMAIN = "entity_audit"
+INTEGRATION_VERSION = "0.3.22"
+BACKUP_EXPORT_FORMAT_VERSION = 1
 STORAGE_KEY = f"{DOMAIN}.storage"
 STORAGE_VERSION = 1
 
@@ -38,6 +40,8 @@ ACTIVITY_EVENT_TYPES = frozenset(
         "script_yaml_exported",
         "automation_package_exported",
         "configuration_yaml_exported",
+        "configuration_backup_exported",
+        "configuration_backup_failed",
         "automation_export_failed",
         "automation_editor_opened",
         "labels_pdf_created",
@@ -64,5 +68,5 @@ PROBLEM_STATES = {"unavailable", "unknown"}
 PANEL_URL = "/entity_audit/entity-audit-panel.js"
 QR_LIBRARY_URL = "/entity_audit/qrcode.js"
 QR_READER_LIBRARY_URL = "/entity_audit/jsQR.js"
-PANEL_MODULE_URL = f"{PANEL_URL}?v=0.3.21"
-PANEL_ELEMENT = "entity-audit-panel-v0321"
+PANEL_MODULE_URL = f"{PANEL_URL}?v=0.3.22"
+PANEL_ELEMENT = "entity-audit-panel-v0322"

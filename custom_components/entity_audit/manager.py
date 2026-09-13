@@ -6,7 +6,7 @@ import json
 from datetime import timedelta
 from typing import Any
 
-from homeassistant.const import EVENT_STATE_CHANGED, STATE_OFF, STATE_ON
+from homeassistant.const import EVENT_STATE_CHANGED, STATE_OFF, STATE_ON, STATE_UNAVAILABLE
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
@@ -15,13 +15,46 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    BACKUP_EXPORT_FORMAT_VERSION,
     DEFAULT_ACTIVITY_LOG_ENABLED,
+    INTEGRATION_VERSION,
     MAX_ACTIVITY_EVENTS,
     PROBLEM_STATES,
     STORAGE_KEY,
     STORAGE_VERSION,
 )
 from .network import find_ip_address, find_mac_address
+
+
+_BACKUP_ATTRIBUTE_KEYS = frozenset(
+    {
+        "device_class",
+        "duration",
+        "editable",
+        "has_date",
+        "has_time",
+        "icon",
+        "max",
+        "min",
+        "mode",
+        "options",
+        "state_class",
+        "step",
+        "supported_features",
+        "unit_of_measurement",
+    }
+)
+
+
+def _backup_attribute_value(value: Any) -> Any:
+    """Return a JSON-safe value from a deliberately small attribute allowlist."""
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_backup_attribute_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _backup_attribute_value(item) for key, item in value.items()}
+    return str(value)
 
 
 class EntityAuditManager:
@@ -155,6 +188,7 @@ class EntityAuditManager:
     def get_settings(self) -> dict[str, Any]:
         """Return administrator-configured panel settings."""
         return {
+            "backup_export_format_version": BACKUP_EXPORT_FORMAT_VERSION,
             "activity_log_enabled": self._activity_enabled,
             "retention_days": self.retention_days,
             "max_events_per_entity": self.max_events,
@@ -162,6 +196,7 @@ class EntityAuditManager:
             "label_width_mm": self.label_width,
             "label_height_mm": self.label_height,
             "label_variant": self.label_variant,
+            "integration_version": INTEGRATION_VERSION,
         }
 
     @callback
@@ -216,10 +251,11 @@ class EntityAuditManager:
         for entity_id in entity_ids:
             state = self.hass.states.get(entity_id)
             entry = registry_entries.get(entity_id)
+            state_attributes = state.attributes if state else {}
             disabled = bool(entry and entry.disabled)
             if state:
                 problem = state.state if state.state in PROBLEM_STATES else None
-                name = state.attributes.get("friendly_name")
+                name = state_attributes.get("friendly_name")
             else:
                 problem = None if disabled else "missing"
                 name = None
@@ -282,7 +318,7 @@ class EntityAuditManager:
                     "area_id": area_id,
                     "area_name": area.name if area else None,
                     "ip_address": find_ip_address(
-                        state.attributes if state else None,
+                        state_attributes,
                         getattr(device, "configuration_url", None) if device else None,
                         entry_config_data,
                     ),
@@ -290,6 +326,15 @@ class EntityAuditManager:
                         getattr(device, "connections", None) if device else None
                     ),
                     "state": state.state if state else None,
+                    "unit": state_attributes.get("unit_of_measurement"),
+                    "available": (
+                        state.state != STATE_UNAVAILABLE if state else None
+                    ),
+                    "backup_attributes": {
+                        key: _backup_attribute_value(state_attributes[key])
+                        for key in _BACKUP_ATTRIBUTE_KEYS
+                        if key in state_attributes
+                    },
                     "disabled": disabled,
                     "logging": entity_id in self._enabled,
                     "problem": problem,

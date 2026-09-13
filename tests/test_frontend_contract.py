@@ -32,6 +32,7 @@ QR_READER_LICENSE_FILE = (
 )
 MANAGER_FILE = ROOT / "custom_components" / "entity_audit" / "manager.py"
 WEBSOCKET_FILE = ROOT / "custom_components" / "entity_audit" / "websocket.py"
+BACKUP_FILE = ROOT / "custom_components" / "entity_audit" / "backup.py"
 CONFIG_FLOW_FILE = ROOT / "custom_components" / "entity_audit" / "config_flow.py"
 DIAGNOSTICS_FILE = ROOT / "custom_components" / "entity_audit" / "diagnostics.py"
 STRINGS_FILE = ROOT / "custom_components" / "entity_audit" / "strings.json"
@@ -213,6 +214,13 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn("_exportAutomationYaml", frontend)
         self.assertIn("_exportConfigurationYaml", frontend)
         self.assertIn("_configurationIncludeYaml", frontend)
+        self.assertIn("_exportConfigurationBackup", frontend)
+        self.assertIn("entity-audit-backup", frontend)
+        self.assertIn("restore/automations.yaml", frontend)
+        self.assertIn("inventory/entities.csv", frontend)
+        self.assertIn("diagnostics/validation.txt", frontend)
+        self.assertIn("context/dependencies.yaml", frontend)
+        self.assertIn("context/automation_states.json", frontend)
         self.assertIn("_exportAutomationPackage", frontend)
         self.assertIn("_createZip", frontend)
         self.assertIn("_openAutomationEditor", frontend)
@@ -222,16 +230,23 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn("entity-audit-automations", frontend)
         self.assertIn("entity-audit-scripts", frontend)
         self.assertIn("entity-audit-configuration", frontend)
-        self.assertIn("entity-audit-automation-package", frontend)
+        self.assertIn("entity-audit-configuration-backup", frontend)
         self.assertIn("# Entity Audit status at export", frontend)
         self.assertIn("configuration_yaml_exported", CONST_FILE.read_text(encoding="utf-8"))
+        self.assertIn("configuration_backup_exported", CONST_FILE.read_text(encoding="utf-8"))
+        self.assertIn("configuration_backup_failed", CONST_FILE.read_text(encoding="utf-8"))
         self.assertIn("def get_automation_scripts", manager)
         self.assertIn('self.hass.states.async_entity_ids(kind)', manager)
         self.assertIn('"edit_id": str(edit_id)', manager)
         self.assertIn('"automation_enabled": automation_enabled', manager)
         self.assertIn('"status": status', manager)
+        self.assertIn('"backup_attributes":', manager)
+        self.assertIn('"available":', manager)
         self.assertNotIn("automation.storage", manager)
         self.assertIn('f"{DOMAIN}/list_automation_scripts"', websocket)
+        self.assertIn('f"{DOMAIN}/validate_configuration_export"', websocket)
+        self.assertIn("validate_configuration_snapshot", websocket)
+        self.assertTrue(BACKUP_FILE.is_file())
 
     def test_panel_and_config_flow_are_english_only(self) -> None:
         frontend = FRONTEND_FILE.read_text(encoding="utf-8")

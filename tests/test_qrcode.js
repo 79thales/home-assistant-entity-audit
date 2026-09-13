@@ -191,8 +191,8 @@ catalogPanel._renderAutomationCategory();
 if (!catalogPanel.shadowRoot.innerHTML.includes("Export automation YAML")) {
   throw new Error("Automations category did not render its YAML export");
 }
-if (!catalogPanel.shadowRoot.innerHTML.includes("Export all YAML package (ZIP)")) {
-  throw new Error("Automations category did not render its ZIP package export");
+if (!catalogPanel.shadowRoot.innerHTML.includes("Export configuration backup (ZIP)")) {
+  throw new Error("Automations category did not render its configuration backup export");
 }
 if (!catalogPanel.shadowRoot.innerHTML.includes("Export configuration.yaml")) {
   throw new Error("Automations category did not render its configuration YAML export");
@@ -211,20 +211,40 @@ const sanitizedConfiguration = catalogPanel._redactConfiguration({
   alias: "Example",
   api_key: "must-not-export",
   nested: { access_token: "must-not-export" },
+  webhook_id: "must-not-export",
+  request_header: "Bearer very-secret-token",
+  callback_url: "https://user:password@example.invalid/api",
 });
-if (sanitizedConfiguration.api_key !== "REDACTED" || sanitizedConfiguration.nested.access_token !== "REDACTED") {
+if (sanitizedConfiguration.api_key !== "<REDACTED>" || sanitizedConfiguration.nested.access_token !== "<REDACTED>" || sanitizedConfiguration.webhook_id !== "<REDACTED>" || sanitizedConfiguration.request_header !== "<REDACTED>" || sanitizedConfiguration.callback_url !== "<REDACTED>") {
   throw new Error("Sensitive automation configuration values were not redacted");
 }
-const exportedYaml = catalogPanel._yamlValue([{ alias: "Example", token: "REDACTED" }]);
-if (!exportedYaml.includes("token: \"REDACTED\"")) {
+const exportedYaml = catalogPanel._yamlValue([{ alias: "Example", token: "<REDACTED>" }]);
+if (!exportedYaml.includes("token: \"<REDACTED>\"")) {
   throw new Error("Sanitized configuration could not be serialized as YAML");
 }
 const automationSnapshot = catalogPanel._automationYaml([{
   item: catalogPanel._automationScripts[0],
-  config: { alias: "Example automation" },
+  config: {
+    id: "1778438477010",
+    alias: "Example automation",
+    triggers: [{ trigger: "state", entity_id: "sensor.example_temperature" }],
+    conditions: [],
+    actions: [{ action: "switch.turn_on", target: { entity_id: "switch.example" } }],
+    mode: "single",
+  },
 }]);
 if (!automationSnapshot.includes("# Entity Audit status at export: enabled")) {
   throw new Error("Automation YAML does not identify the current enabled status");
+}
+if (!automationSnapshot.includes("-\n  id: \"1778438477010\"")) {
+  throw new Error("Automation YAML does not use a restorable YAML list item");
+}
+const scriptSnapshot = catalogPanel._scriptYaml([{
+  item: catalogPanel._automationScripts[1],
+  config: { alias: "Example script", sequence: [{ action: "light.turn_on" }] },
+}]);
+if (!scriptSnapshot.includes("example_script:\n  alias: \"Example script\"")) {
+  throw new Error("Script YAML does not use a restorable mapping keyed by script id");
 }
 if (catalogPanel._automationExportStatus({ kind: "automation", state: "off", automation_enabled: false }) !== "disabled") {
   throw new Error("Automation export status does not identify disabled automations");
@@ -233,20 +253,140 @@ const configurationInclude = catalogPanel._configurationIncludeYaml();
 if (!configurationInclude.includes("automation: !include automations.yaml") || !configurationInclude.includes("script: !include scripts.yaml")) {
   throw new Error("Configuration YAML export is missing include directives");
 }
+const dependencies = catalogPanel._collectDependencies([{
+  item: catalogPanel._automationScripts[0],
+  config: {
+    id: "1778438477010",
+    alias: "Example automation",
+    triggers: [{ trigger: "state", entity_id: "sensor.example_temperature" }],
+    actions: [{ action: "switch.turn_on", target: { entity_id: "switch.example" } }],
+    variables: { description: "{{ states('input_boolean.example_mode') }} {{ states(variable_entity) }}" },
+  },
+}]);
+const dependencyEntityIds = dependencies.entities.map((entry) => entry.entity_id);
+if (!dependencyEntityIds.includes("sensor.example_temperature") || !dependencyEntityIds.includes("switch.example") || !dependencyEntityIds.includes("input_boolean.example_mode")) {
+  throw new Error("Dependency scan did not collect static entity references");
+}
+if (!dependencies.services.some((entry) => entry.service === "switch.turn_on")) {
+  throw new Error("Dependency scan did not collect service references");
+}
+if (!dependencies.dynamic_references.some((entry) => entry.expression.includes("states(variable_entity"))) {
+  throw new Error("Dependency scan did not identify a dynamic template reference");
+}
+const missingDependency = dependencies.entities.find((entry) => entry.entity_id === "switch.example");
+if (!missingDependency || !missingDependency.referenced_by.some((reference) => reference.alias === "Example automation")) {
+  throw new Error("Dependency scan did not retain the source of a missing entity reference");
+}
+if (catalogPanel._backupEntityState({ domain: "input_text", entity_id: "input_text.password", name: "Password", state: "secret" }) !== "<REDACTED>") {
+  throw new Error("Sensitive helper state was not redacted from the backup inventory");
+}
 
 async function testZipPackage() {
   const archive = catalogPanel._createZip([
-    { name: "configuration.yaml", content: "automation: !include automations.yaml\n" },
-    { name: "automations.yaml", content: "[]\n" },
-    { name: "scripts.yaml", content: "{}\n" },
+    { name: "entity-audit-backup-2026-09-13_16-20/README.md", content: "Backup\n" },
+    { name: "entity-audit-backup-2026-09-13_16-20/manifest.json", content: "{}\n" },
+    { name: "entity-audit-backup-2026-09-13_16-20/restore/automations.yaml", content: "[]\n" },
+    { name: "entity-audit-backup-2026-09-13_16-20/restore/scripts.yaml", content: "{}\n" },
+    { name: "entity-audit-backup-2026-09-13_16-20/diagnostics/validation.txt", content: "VALIDATION RESULT: PASS\n" },
   ]);
   const bytes = new Uint8Array(await archive.arrayBuffer());
   if (bytes[0] !== 0x50 || bytes[1] !== 0x4b || bytes[2] !== 0x03 || bytes[3] !== 0x04) {
     throw new Error("Automation export package is not a ZIP file");
   }
   const zipText = new TextDecoder().decode(bytes);
-  for (const name of ["configuration.yaml", "automations.yaml", "scripts.yaml"]) {
-    if (!zipText.includes(name)) throw new Error(`Automation ZIP package is missing ${name}`);
+  for (const name of ["README.md", "manifest.json", "restore/automations.yaml", "restore/scripts.yaml", "diagnostics/validation.txt"]) {
+    if (!zipText.includes(name)) throw new Error(`Configuration backup ZIP is missing ${name}`);
+  }
+}
+
+async function testInvalidConfigurationResponseFailsCollection() {
+  const backupPanel = new global.EntityAuditPanel();
+  backupPanel._hass = {
+    callWS: () => Promise.resolve({ config: null }),
+  };
+  const result = await backupPanel._getBackupConfigurationSnapshots([
+    { entity_id: "automation.example", kind: "automation" },
+  ], "automation");
+  if (result.snapshots.length !== 0 || result.errors[0]?.error !== "invalid_configuration_response") {
+    throw new Error("An invalid automation configuration response was silently accepted");
+  }
+}
+
+async function testConfigurationBackupContainsValidatedSnapshot() {
+  const backupPanel = new global.EntityAuditPanel();
+  let downloaded = null;
+  backupPanel._render = () => {};
+  backupPanel._recordActivity = () => {};
+  backupPanel._load = () => Promise.resolve();
+  backupPanel._loadAutomationScripts = () => Promise.resolve();
+  backupPanel._downloadBlob = (prefix, extension, blob) => { downloaded = { prefix, extension, blob }; };
+  backupPanel._entities = [
+    { entity_id: "sensor.example_temperature", domain: "sensor", name: "Temperature", state: "20", unit: "°C", available: true, device_id: "device-1", device_name: "Example device", manufacturer: "Example", model: "Model", area_id: "office", area_name: "Office", platform: "example", last_changed: "2026-09-13T10:00:00+00:00" },
+    { entity_id: "switch.example", domain: "switch", name: "Example switch", state: "off", unit: null, available: true, device_id: "device-1", device_name: "Example device", manufacturer: "Example", model: "Model", area_id: "office", area_name: "Office", platform: "example", last_changed: "2026-09-13T10:00:00+00:00" },
+    { entity_id: "light.example", domain: "light", name: "Example light", state: "off", unit: null, available: true, device_id: "device-1", device_name: "Example device", manufacturer: "Example", model: "Model", area_id: "office", area_name: "Office", platform: "example", last_changed: "2026-09-13T10:00:00+00:00" },
+  ];
+  backupPanel._automationScripts = [
+    { entity_id: "automation.example_automation", kind: "automation", name: "Example automation", edit_id: "example-automation", unique_id: "example-automation", state: "on", disabled: false, automation_enabled: true, status: "enabled" },
+    { entity_id: "script.example_script", kind: "script", name: "Example script", edit_id: "example_script", unique_id: "example_script", state: "off", disabled: false, automation_enabled: null, status: "idle" },
+  ];
+  backupPanel._hass = {
+    config: { version: "2026.9.2" },
+    callWS(message) {
+      if (message.type === "automation/config") {
+        return Promise.resolve({ config: {
+          id: "1778438477010",
+          alias: "Example automation",
+          triggers: [{ trigger: "state", entity_id: "sensor.example_temperature" }],
+          conditions: [],
+          actions: [{ action: "switch.turn_on", target: { entity_id: "switch.example" } }],
+          mode: "single",
+        } });
+      }
+      if (message.type === "script/config") {
+        return Promise.resolve({ config: {
+          alias: "Example script",
+          sequence: [{ action: "light.turn_on", target: { entity_id: "light.example" } }],
+        } });
+      }
+      if (message.type === "get_services") {
+        return Promise.resolve({ switch: { turn_on: {} }, light: { turn_on: {} } });
+      }
+      if (message.type === "entity_audit/validate_configuration_export") {
+        return Promise.resolve({
+          backup_valid: true,
+          yaml_valid: true,
+          automations_top_level_list: true,
+          scripts_top_level_mapping: true,
+          duplicate_automation_ids: [],
+          duplicate_automation_aliases: [],
+          duplicate_automation_yaml_keys: [],
+          duplicate_script_keys: [],
+          errors: [],
+          warnings: [],
+        });
+      }
+      throw new Error(`Unexpected WebSocket command: ${message.type}`);
+    },
+  };
+
+  await backupPanel._exportConfigurationBackup();
+  if (!downloaded || downloaded.prefix !== "entity-audit-configuration-backup" || downloaded.extension !== "zip") {
+    throw new Error("Configuration backup was not downloaded as a ZIP");
+  }
+  const archiveText = new TextDecoder().decode(new Uint8Array(await downloaded.blob.arrayBuffer()));
+  for (const path of [
+    "README.md", "manifest.json", "restore/automations.yaml", "restore/scripts.yaml", "restore/helpers.yaml",
+    "inventory/entities.csv", "inventory/devices.csv", "inventory/areas.csv", "inventory/integrations.csv", "inventory/services.csv",
+    "context/dependencies.yaml", "context/automations.json", "context/scripts.json", "context/automation_states.json", "context/home_assistant.json",
+    "diagnostics/validation.txt", "diagnostics/validation.json", "diagnostics/missing_entities.yaml", "diagnostics/missing_services.yaml",
+  ]) {
+    if (!archiveText.includes(path)) throw new Error(`Configuration backup is missing ${path}`);
+  }
+  if (!archiveText.includes('"export_format": "entity-audit-backup"') || !archiveText.includes('"automations_enabled": 1') || !archiveText.includes('"enabled": true')) {
+    throw new Error("Configuration backup manifest does not preserve automation state");
+  }
+  if (!archiveText.includes('id: "1778438477010"') || !archiveText.includes('example_script:')) {
+    throw new Error("Configuration backup did not preserve restorable automation and script identities");
   }
 }
 
@@ -389,7 +529,7 @@ function testCameraWaitTimeout() {
 
 testCameraWaitTimeout();
 testEditorNavigation();
-testZipPackage().then(testCameraRequestUsesTheOriginalTap).catch((error) => {
+testZipPackage().then(testInvalidConfigurationResponseFailsCollection).then(testConfigurationBackupContainsValidatedSnapshot).then(testCameraRequestUsesTheOriginalTap).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

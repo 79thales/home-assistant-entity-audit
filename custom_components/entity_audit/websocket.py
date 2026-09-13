@@ -7,6 +7,7 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant
 
+from .backup import validate_configuration_snapshot
 from .const import ACTIVITY_EVENT_TYPES, DOMAIN
 from .manager import EntityAuditManager
 
@@ -21,6 +22,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_list_hacs_repositories)
     websocket_api.async_register_command(hass, ws_list_users)
     websocket_api.async_register_command(hass, ws_list_automation_scripts)
+    websocket_api.async_register_command(hass, ws_validate_configuration_export)
     websocket_api.async_register_command(hass, ws_get_settings)
     websocket_api.async_register_command(hass, ws_log_activity)
 
@@ -125,6 +127,25 @@ async def ws_list_users(hass, connection, msg) -> None:
 async def ws_list_automation_scripts(hass, connection, msg) -> None:
     """List current automation and script entities."""
     connection.send_result(msg["id"], _manager(hass).get_automation_scripts())
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/validate_configuration_export",
+        vol.Required("automations_yaml"): vol.All(str, vol.Length(max=10_000_000)),
+        vol.Required("scripts_yaml"): vol.All(str, vol.Length(max=10_000_000)),
+    }
+)
+@websocket_api.async_response
+async def ws_validate_configuration_export(hass, connection, msg) -> None:
+    """Validate generated YAML without changing Home Assistant configuration."""
+    result = await hass.async_add_executor_job(
+        validate_configuration_snapshot,
+        msg["automations_yaml"],
+        msg["scripts_yaml"],
+    )
+    connection.send_result(msg["id"], result)
 
 
 @websocket_api.require_admin
