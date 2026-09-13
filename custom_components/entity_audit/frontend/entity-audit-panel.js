@@ -21,6 +21,12 @@ class EntityAuditPanel extends HTMLElement {
     this._usersLoaded = false;
     this._usersLoading = false;
     this._userRole = "";
+    this._automationScripts = [];
+    this._automationScriptsLoaded = false;
+    this._automationScriptsLoading = false;
+    this._automationKind = "";
+    this._automationState = "";
+    this._automationExporting = null;
     this._groupBy = "device";
     this._problemOnly = false;
     this._selected = null;
@@ -137,6 +143,23 @@ class EntityAuditPanel extends HTMLElement {
     }
   }
 
+  async _loadAutomationScripts(force = false) {
+    if (!this._hass || this._automationScriptsLoading || (!force && this._automationScriptsLoaded)) return;
+    this._automationScriptsLoading = true;
+    this._categoryError = null;
+    this._render();
+    try {
+      const result = await this._hass.callWS({ type: "entity_audit/list_automation_scripts" });
+      this._automationScripts = Array.isArray(result) ? result : [];
+      this._automationScriptsLoaded = true;
+    } catch (error) {
+      this._categoryError = error.message || String(error);
+    } finally {
+      this._automationScriptsLoading = false;
+      this._render();
+    }
+  }
+
   async _setCategory(category) {
     if (category === this._category) return;
     this._category = category;
@@ -151,6 +174,10 @@ class EntityAuditPanel extends HTMLElement {
       await this._loadUsers();
       return;
     }
+    if (category === "automations") {
+      await this._loadAutomationScripts();
+      return;
+    }
     this._render();
   }
 
@@ -161,6 +188,10 @@ class EntityAuditPanel extends HTMLElement {
     }
     if (this._category === "users") {
       await this._loadUsers(true);
+      return;
+    }
+    if (this._category === "automations") {
+      await this._loadAutomationScripts(true);
       return;
     }
     this._recordActivity("inventory_refreshed");
@@ -309,6 +340,138 @@ class EntityAuditPanel extends HTMLElement {
       ])
     );
     this._recordActivity("users_csv_exported", "info", String(rows.length));
+  }
+
+  _exportAutomationCsv(rows) {
+    this._downloadCsv(
+      "entity-audit-automations-and-scripts",
+      ["name", "entity_id", "kind", "state", "mode", "current_runs", "max_runs", "last_triggered", "unique_id", "disabled", "platform"],
+      rows.map((item) => [
+        item.name,
+        item.entity_id,
+        item.kind,
+        item.state,
+        item.mode,
+        item.current,
+        item.max,
+        item.last_triggered,
+        item.unique_id,
+        item.disabled ? "true" : "false",
+        item.platform,
+      ])
+    );
+    this._recordActivity("automation_csv_exported", "info", String(rows.length));
+  }
+
+  _downloadText(prefix, extension, text, type) {
+    const blob = new Blob([text], { type });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${prefix}-${new Date().toISOString().slice(0, 10)}.${extension}`;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  _redactConfiguration(value) {
+    if (Array.isArray(value)) return value.map((item) => this._redactConfiguration(item));
+    if (!value || typeof value !== "object") return value;
+    const result = {};
+    for (const [key, nestedValue] of Object.entries(value)) {
+      result[key] = /(?:^|[_-])(password|passphrase|token|api[_-]?key|secret|authorization|cookie|session|private[_-]?key|access[_-]?token|refresh[_-]?token)(?:$|[_-])/i.test(key)
+        ? "REDACTED"
+        : this._redactConfiguration(nestedValue);
+    }
+    return result;
+  }
+
+  _yamlKey(key) {
+    return /^[A-Za-z_][A-Za-z0-9_-]*$/.test(key) ? key : JSON.stringify(key);
+  }
+
+  _yamlScalar(value) {
+    if (value === null || value === undefined) return "null";
+    if (typeof value === "boolean" || typeof value === "number") return String(value);
+    return JSON.stringify(String(value));
+  }
+
+  _yamlValue(value, indent = 0) {
+    const pad = " ".repeat(indent);
+    if (value === null || value === undefined || typeof value !== "object") {
+      return `${pad}${this._yamlScalar(value)}`;
+    }
+    if (Array.isArray(value)) {
+      if (!value.length) return `${pad}[]`;
+      return value.map((item) => {
+        if (item && typeof item === "object") return `${pad}-\n${this._yamlValue(item, indent + 2)}`;
+        return `${pad}- ${this._yamlScalar(item)}`;
+      }).join("\n");
+    }
+    const entries = Object.entries(value);
+    if (!entries.length) return `${pad}{}`;
+    return entries.map(([key, nestedValue]) => {
+      if (nestedValue && typeof nestedValue === "object") {
+        return `${pad}${this._yamlKey(key)}:\n${this._yamlValue(nestedValue, indent + 2)}`;
+      }
+      return `${pad}${this._yamlKey(key)}: ${this._yamlScalar(nestedValue)}`;
+    }).join("\n");
+  }
+
+  async _mapWithConcurrency(items, limit, worker) {
+    const result = new Array(items.length);
+    let next = 0;
+    const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const index = next;
+        next += 1;
+        result[index] = await worker(items[index]);
+      }
+    });
+    await Promise.all(runners);
+    return result;
+  }
+
+  async _exportAutomationYaml(rows, kind) {
+    const selected = rows.filter((item) => item.kind === kind && item.state !== "missing");
+    if (!selected.length || this._automationExporting) return;
+    this._automationExporting = kind;
+    this._render();
+    try {
+      const configs = await this._mapWithConcurrency(selected, 4, async (item) => {
+        const response = await this._hass.callWS({ type: `${kind}/config`, entity_id: item.entity_id });
+        return { item, config: this._redactConfiguration(response.config) };
+      });
+      const header = [
+        "# Generated by Entity Audit.",
+        "# This is a sanitized configuration snapshot of the selected items.",
+        "# Values under sensitive keys (for example token, password, secret, or api_key) are replaced with REDACTED.",
+        "# Review before using this file to replace Home Assistant configuration.",
+        "",
+      ].join("\n");
+      let yaml;
+      if (kind === "automation") {
+        yaml = `${header}${this._yamlValue(configs.map(({ config }) => config))}\n`;
+      } else {
+        const scripts = Object.fromEntries(configs.map(({ item, config }) => [
+          item.unique_id || item.entity_id.slice("script.".length),
+          config,
+        ]));
+        yaml = `${header}${this._yamlValue(scripts)}\n`;
+      }
+      this._downloadText(
+        kind === "automation" ? "entity-audit-automations" : "entity-audit-scripts",
+        "yaml",
+        yaml,
+        "application/x-yaml;charset=utf-8"
+      );
+      this._recordActivity(kind === "automation" ? "automation_yaml_exported" : "script_yaml_exported", "info", String(selected.length));
+    } catch (error) {
+      this._recordActivity("automation_export_failed", "error", error?.name || "export_failed");
+      alert(`The ${kind} YAML export could not be created. Check that Home Assistant ${kind}s are loaded, then try again.`);
+    } finally {
+      this._automationExporting = null;
+      this._render();
+    }
   }
 
   _recordActivity(eventType, level = "info", detail = null) {
@@ -1096,7 +1259,155 @@ class EntityAuditPanel extends HTMLElement {
     return [...groups.values()].sort((a, b) => a.label.localeCompare(b.label));
   }
 
+  _renderAutomationCategory() {
+    const query = this._filter.toLocaleLowerCase();
+    const stateOptions = [...new Set(this._automationScripts.map((item) => item.state || "missing"))]
+      .sort((a, b) => a.localeCompare(b));
+    const rows = this._automationScripts.filter((item) => {
+      const matches = !query || `${item.name || ""} ${item.entity_id || ""} ${item.kind || ""} ${item.state || ""} ${item.mode || ""} ${item.platform || ""}`.toLocaleLowerCase().includes(query);
+      return matches
+        && (!this._automationKind || item.kind === this._automationKind)
+        && (!this._automationState || item.state === this._automationState);
+    });
+    const automationCount = this._automationScripts.filter((item) => item.kind === "automation").length;
+    const scriptCount = this._automationScripts.filter((item) => item.kind === "script").length;
+    const activeCount = this._automationScripts.filter((item) => item.state === "on").length;
+    const exporting = this._automationExporting;
+    const stateBadge = (item) => {
+      if (item.disabled) return "Registry disabled";
+      if (item.state === "on") return item.kind === "automation" ? "Enabled" : "Running";
+      if (item.state === "off") return item.kind === "automation" ? "Disabled" : "Idle";
+      return item.state || "Missing";
+    };
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display:block; min-height:100vh; color:var(--primary-text-color); background:var(--primary-background-color); font-family:Roboto, "Noto Sans", Arial, sans-serif; color-scheme:light dark; }
+        * { box-sizing:border-box; }
+        ha-top-app-bar-fixed { display:block; height:100vh; }
+        .system-title { font-size:inherit; font-weight:inherit; }
+        .system-action { width:48px; min-width:48px; padding:0; border:0; color:var(--app-header-text-color, white); background:transparent; font-size:25px; }
+        .system-sub-row, .ribbon-controls { display:flex; align-items:center; gap:10px; }
+        .system-sub-row { width:100%; min-height:58px; padding:7px 16px; color:var(--primary-text-color); background:var(--primary-background-color); border-bottom:1px solid var(--divider-color); }
+        button, input, select { font:inherit; }
+        button { min-height:44px; border:1px solid var(--divider-color); border-radius:9px; padding:9px 13px; cursor:pointer; font-weight:600; color:var(--primary-text-color); background:var(--card-background-color); }
+        button:disabled { cursor:default; opacity:.55; }
+        button:focus-visible, input:focus-visible, select:focus-visible { outline:3px solid var(--primary-color); outline-offset:2px; }
+        .search-wrap { flex:1; min-width:180px; min-height:44px; display:flex; align-items:center; gap:9px; padding:0 13px; border:1px solid var(--divider-color); border-radius:11px; color:var(--primary-text-color); background:var(--card-background-color); }
+        .search-icon { font-size:24px; line-height:1; opacity:.9; }
+        .search { width:100%; min-width:0; border:0; outline:0; color:inherit; background:transparent; font-size:16px; }
+        .filter-toggle { white-space:nowrap; }
+        .select-wrap { position:relative; min-width:200px; }
+        .select-wrap select, .filters select { width:100%; min-height:44px; appearance:none; -webkit-appearance:none; border:1px solid var(--divider-color); border-radius:9px; padding:10px 38px 10px 13px; color:var(--primary-text-color); background-color:var(--card-background-color); background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='10' viewBox='0 0 16 10'%3E%3Cpath fill='%238fa4bf' d='m1 1 7 7 7-7' stroke='%238fa4bf' stroke-width='2'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 13px center; }
+        main { max-width:1400px; margin:auto; padding:20px; }
+        .stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
+        .stat, .card, .filter-panel { background:var(--card-background-color); border-radius:12px; box-shadow:var(--ha-card-box-shadow); padding:16px; }
+        .stat b { font-size:28px; line-height:1.05; display:block; }
+        .stat { font-size:14px; font-weight:500; }
+        .filter-panel { margin-bottom:12px; }
+        .toolbar { display:flex; gap:10px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
+        .filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px; }
+        .privacy-note { color:var(--secondary-text-color); font-size:13px; line-height:1.45; margin:12px 0 0; }
+        .table-wrap { overflow:auto; background:var(--card-background-color); border-radius:12px; box-shadow:var(--ha-card-box-shadow); }
+        table { width:100%; border-collapse:collapse; }
+        th, td { padding:12px 13px; text-align:left; border-bottom:1px solid var(--divider-color); vertical-align:top; }
+        th { font-size:12px; color:var(--secondary-text-color); text-transform:uppercase; letter-spacing:.03em; position:sticky; top:0; background:var(--card-background-color); }
+        tr:hover td { background:var(--secondary-background-color); }
+        .name { font-size:15px; font-weight:700; overflow-wrap:anywhere; }
+        .muted { color:var(--secondary-text-color); font-size:13px; line-height:1.35; overflow-wrap:anywhere; }
+        .badge { display:inline-block; border-radius:999px; padding:5px 9px; font-size:13px; font-weight:600; background:var(--secondary-background-color); white-space:nowrap; }
+        .active { color:var(--primary-color); }
+        .inactive { color:var(--error-color); }
+        .empty { text-align:center; padding:35px; color:var(--secondary-text-color); }
+        @media(max-width:700px) {
+          .system-sub-row { display:grid; grid-template-columns:minmax(0,1fr) auto; padding:7px 10px; }
+          .ribbon-controls { grid-column:1 / -1; overflow-x:auto; padding-bottom:1px; }
+          .ribbon-controls .select-wrap { min-width:185px; }
+          .stats { grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-bottom:12px; }
+          .stat { min-height:78px; padding:12px 9px; font-size:12px; overflow-wrap:anywhere; }
+          .stat b { font-size:24px; }
+          main { padding:12px; }
+          .filter-panel { padding:12px; }
+          .filter-panel:not(.open) { display:none; }
+          .toolbar button { width:100%; }
+          .filters { grid-template-columns:1fr; }
+          th:nth-child(4), td:nth-child(4), th:nth-child(5), td:nth-child(5), th:nth-child(6), td:nth-child(6) { display:none; }
+        }
+      </style>
+      <ha-top-app-bar-fixed ${this._narrow ? "narrow" : ""}>
+        <span slot="title" class="system-title">Entity Audit</span>
+        <button slot="actionItems" id="refresh" class="system-action" title="Refresh automations and scripts" aria-label="Refresh automations and scripts">${this._automationScriptsLoading ? "…" : "↻"}</button>
+        <div slot="subRow" class="system-sub-row">
+          <label class="search-wrap"><span class="search-icon" aria-hidden="true">⌕</span><input id="search" class="search" type="search" placeholder="Search automation or script…" value="${this._escape(this._filter)}" aria-label="Search automations and scripts"></label>
+          <button id="toggle-filters" class="filter-toggle" aria-expanded="${this._filtersOpen}">☰ Filters</button>
+          <div class="ribbon-controls">
+            <label class="select-wrap"><select id="category" aria-label="Category">
+              <option value="entities">Entities</option>
+              <option value="hacs">HACS repositories</option>
+              <option value="users">Users &amp; permissions</option>
+              <option value="automations" selected>Automations &amp; scripts</option>
+            </select></label>
+          </div>
+        </div>
+        <main>
+          ${this._categoryError ? `<div class="card inactive">${this._escape(this._categoryError)}</div>` : ""}
+          <section class="stats">
+            <div class="stat"><b>${automationCount}</b>automations</div>
+            <div class="stat"><b>${scriptCount}</b>scripts</div>
+            <div class="stat"><b>${activeCount}</b>enabled or running</div>
+          </section>
+          <section class="filter-panel ${this._filtersOpen ? "open" : ""}">
+            <div class="toolbar">
+              <button id="export-automation-csv" ${rows.length ? "" : "disabled"}>Export CSV</button>
+              <button id="export-automation-yaml" ${rows.some((item) => item.kind === "automation" && item.state !== "missing") && !exporting ? "" : "disabled"}>${exporting === "automation" ? "Creating automation YAML…" : "Export automation YAML"}</button>
+              <button id="export-script-yaml" ${rows.some((item) => item.kind === "script" && item.state !== "missing") && !exporting ? "" : "disabled"}>${exporting === "script" ? "Creating script YAML…" : "Export script YAML"}</button>
+            </div>
+            <div class="filters">
+              <select id="automation-kind-filter" aria-label="Filter by type"><option value="">All automations and scripts</option><option value="automation" ${this._automationKind === "automation" ? "selected" : ""}>Automations</option><option value="script" ${this._automationKind === "script" ? "selected" : ""}>Scripts</option></select>
+              <select id="automation-state-filter" aria-label="Filter by state"><option value="">All states</option>${stateOptions.map((state) => `<option value="${this._escape(state)}" ${this._automationState === state ? "selected" : ""}>${this._escape(state)}</option>`).join("")}</select>
+            </div>
+            <p class="privacy-note">CSV is an inventory summary. YAML exports use Home Assistant's administrator-only configuration API for the displayed items, do not read configuration files or private storage, and redact values under sensitive keys before download.</p>
+          </section>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Name</th><th>Type</th><th>State</th><th>Mode</th><th>Current runs</th><th>Last triggered</th></tr></thead>
+            <tbody>${rows.map((item) => `<tr>
+              <td><div class="name">${this._escape(item.name)}</div><div class="muted">${this._escape(item.entity_id)}</div>${item.disabled ? `<div class="muted">Registry disabled</div>` : ""}</td>
+              <td>${this._escape(item.kind)}</td>
+              <td><span class="badge ${item.state === "on" ? "active" : (item.state === "unavailable" || item.state === "missing" ? "inactive" : "")}">${this._escape(stateBadge(item))}</span></td>
+              <td>${this._escape(item.mode || "—")}</td>
+              <td>${this._escape(item.current ?? "—")}</td>
+              <td>${this._escape(item.last_triggered || "—")}</td>
+            </tr>`).join("") || `<tr><td class="empty" colspan="6">${this._automationScriptsLoading ? "Loading automations and scripts…" : "No matching automations or scripts"}</td></tr>`}</tbody>
+          </table></div>
+        </main>
+      </ha-top-app-bar-fixed>
+    `;
+
+    this.shadowRoot.querySelector("#refresh")?.addEventListener("click", () => this._refreshCurrentCategory());
+    this.shadowRoot.querySelector("#toggle-filters")?.addEventListener("click", () => {
+      this._filtersOpen = !this._filtersOpen;
+      this._render();
+    });
+    this.shadowRoot.querySelector("#search")?.addEventListener("input", (event) => {
+      this._filter = event.target.value;
+      this._render();
+      const search = this.shadowRoot.querySelector("#search");
+      search?.focus();
+      search?.setSelectionRange(this._filter.length, this._filter.length);
+    });
+    this.shadowRoot.querySelector("#category")?.addEventListener("change", (event) => this._setCategory(event.target.value));
+    this.shadowRoot.querySelector("#automation-kind-filter")?.addEventListener("change", (event) => { this._automationKind = event.target.value; this._render(); });
+    this.shadowRoot.querySelector("#automation-state-filter")?.addEventListener("change", (event) => { this._automationState = event.target.value; this._render(); });
+    this.shadowRoot.querySelector("#export-automation-csv")?.addEventListener("click", () => this._exportAutomationCsv(rows));
+    this.shadowRoot.querySelector("#export-automation-yaml")?.addEventListener("click", () => this._exportAutomationYaml(rows, "automation"));
+    this.shadowRoot.querySelector("#export-script-yaml")?.addEventListener("click", () => this._exportAutomationYaml(rows, "script"));
+  }
+
   _renderSecondaryCategory() {
+    if (this._category === "automations") {
+      this._renderAutomationCategory();
+      return;
+    }
     const isHacs = this._category === "hacs";
     const query = this._filter.toLocaleLowerCase();
     const allRows = isHacs ? this._hacsRepositories : this._users;
@@ -1213,6 +1524,7 @@ class EntityAuditPanel extends HTMLElement {
               <option value="entities">Entities</option>
               <option value="hacs" ${isHacs ? "selected" : ""}>HACS repositories</option>
               <option value="users" ${!isHacs ? "selected" : ""}>Users &amp; permissions</option>
+              <option value="automations">Automations &amp; scripts</option>
             </select></label>
           </div>
         </div>
@@ -1412,6 +1724,7 @@ class EntityAuditPanel extends HTMLElement {
               <option value="entities" selected>Entities</option>
               <option value="hacs">HACS repositories</option>
               <option value="users">Users &amp; permissions</option>
+              <option value="automations">Automations &amp; scripts</option>
             </select></label>
             <label class="select-wrap"><select id="group-by" aria-label="${"Group by"}">
               <option value="none" ${this._groupBy === "none" ? "selected" : ""}>${"No grouping"}</option>
@@ -1542,6 +1855,6 @@ class EntityAuditPanel extends HTMLElement {
   }
 }
 
-if (!customElements.get("entity-audit-panel-v0318")) {
-  customElements.define("entity-audit-panel-v0318", EntityAuditPanel);
+if (!customElements.get("entity-audit-panel-v0319")) {
+  customElements.define("entity-audit-panel-v0319", EntityAuditPanel);
 }

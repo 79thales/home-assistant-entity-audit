@@ -201,6 +201,25 @@ class FrontendContractTest(unittest.TestCase):
         self.assertNotIn("user.refresh_tokens", manager)
         self.assertIn('f"{DOMAIN}/list_users"', websocket)
 
+    def test_automations_category_uses_runtime_inventory_and_native_exports(self) -> None:
+        frontend = FRONTEND_FILE.read_text(encoding="utf-8")
+        manager = MANAGER_FILE.read_text(encoding="utf-8")
+        websocket = WEBSOCKET_FILE.read_text(encoding="utf-8")
+
+        self.assertIn('value="automations"', frontend)
+        self.assertIn("Automations &amp; scripts", frontend)
+        self.assertIn("_exportAutomationCsv", frontend)
+        self.assertIn("_exportAutomationYaml", frontend)
+        self.assertIn('type: `${kind}/config`', frontend)
+        self.assertIn("_redactConfiguration", frontend)
+        self.assertIn("REDACTED", frontend)
+        self.assertIn("entity-audit-automations", frontend)
+        self.assertIn("entity-audit-scripts", frontend)
+        self.assertIn("def get_automation_scripts", manager)
+        self.assertIn('self.hass.states.async_entity_ids(kind)', manager)
+        self.assertNotIn("automation.storage", manager)
+        self.assertIn('f"{DOMAIN}/list_automation_scripts"', websocket)
+
     def test_panel_and_config_flow_are_english_only(self) -> None:
         frontend = FRONTEND_FILE.read_text(encoding="utf-8")
         translations = json.loads(TRANSLATIONS_EN_FILE.read_text(encoding="utf-8"))

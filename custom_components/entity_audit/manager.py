@@ -411,6 +411,61 @@ class EntityAuditManager:
             )
         return sorted(result, key=lambda item: item["name"].casefold())
 
+    @callback
+    def get_automation_scripts(self) -> list[dict[str, Any]]:
+        """Return the current Home Assistant automations and scripts.
+
+        This is deliberately an inventory of runtime state plus public entity
+        registry metadata.  Full configurations are requested by the panel
+        through Home Assistant's administrator-only ``automation/config`` and
+        ``script/config`` WebSocket commands when an administrator explicitly
+        exports YAML.  Entity Audit therefore does not read configuration YAML
+        or the UI automation storage files itself.
+        """
+        registry = er.async_get(self.hass)
+        result: list[dict[str, Any]] = []
+
+        for kind in ("automation", "script"):
+            registry_ids = {
+                entry.entity_id
+                for entry in registry.entities.values()
+                if entry.entity_id.partition(".")[0] == kind
+            }
+            entity_ids = registry_ids | set(self.hass.states.async_entity_ids(kind))
+            for entity_id in entity_ids:
+                state = self.hass.states.get(entity_id)
+                entry = registry.async_get(entity_id)
+                attributes = state.attributes if state else {}
+                name = attributes.get("friendly_name") if state else None
+                if not name and entry:
+                    full_name = getattr(er, "async_get_full_entity_name", None)
+                    name = full_name(self.hass, entry) if full_name else None
+                    name = name or entry.name or entry.original_name
+
+                last_triggered = attributes.get("last_triggered")
+                if hasattr(last_triggered, "isoformat"):
+                    last_triggered = last_triggered.isoformat()
+                result.append(
+                    {
+                        "entity_id": entity_id,
+                        "name": str(name or entity_id),
+                        "kind": kind,
+                        "state": state.state if state else "missing",
+                        "mode": attributes.get("mode"),
+                        "current": attributes.get("current"),
+                        "max": attributes.get("max"),
+                        "last_triggered": last_triggered,
+                        "unique_id": entry.unique_id if entry else None,
+                        "disabled": bool(entry and entry.disabled),
+                        "platform": entry.platform if entry else kind,
+                    }
+                )
+
+        return sorted(
+            result,
+            key=lambda item: (item["kind"], item["name"].casefold(), item["entity_id"]),
+        )
+
     def _data(self) -> dict[str, Any]:
         return {
             "enabled": sorted(self._enabled),

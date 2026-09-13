@@ -155,6 +155,53 @@ if (!catalogPanel.shadowRoot.innerHTML.includes("Example administrator")) {
   throw new Error("Users category did not render users");
 }
 
+catalogPanel._category = "automations";
+catalogPanel._automationScripts = [{
+  name: "Example automation",
+  entity_id: "automation.example_automation",
+  kind: "automation",
+  state: "on",
+  mode: "single",
+  current: 0,
+  max: 10,
+  last_triggered: "2026-09-13T10:00:00+00:00",
+  unique_id: "example-automation",
+  disabled: false,
+  platform: "automation",
+}, {
+  name: "Example script",
+  entity_id: "script.example_script",
+  kind: "script",
+  state: "off",
+  mode: "restart",
+  current: 0,
+  max: 10,
+  last_triggered: null,
+  unique_id: "example_script",
+  disabled: false,
+  platform: "script",
+}];
+catalogPanel._renderAutomationCategory();
+if (!catalogPanel.shadowRoot.innerHTML.includes("Export automation YAML")) {
+  throw new Error("Automations category did not render its YAML export");
+}
+if (!catalogPanel.shadowRoot.innerHTML.includes("Example automation")) {
+  throw new Error("Automations category did not render automations");
+}
+
+const sanitizedConfiguration = catalogPanel._redactConfiguration({
+  alias: "Example",
+  api_key: "must-not-export",
+  nested: { access_token: "must-not-export" },
+});
+if (sanitizedConfiguration.api_key !== "REDACTED" || sanitizedConfiguration.nested.access_token !== "REDACTED") {
+  throw new Error("Sensitive automation configuration values were not redacted");
+}
+const exportedYaml = catalogPanel._yamlValue([{ alias: "Example", token: "REDACTED" }]);
+if (!exportedYaml.includes("token: \"REDACTED\"")) {
+  throw new Error("Sanitized configuration could not be serialized as YAML");
+}
+
 for (const invalidPayload of ["not-json", "{}", '{"name":"Only a name"}']) {
   let rejected = false;
   try {
