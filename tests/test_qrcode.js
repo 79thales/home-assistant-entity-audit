@@ -166,6 +166,7 @@ catalogPanel._automationScripts = [{
   max: 10,
   last_triggered: "2026-09-13T10:00:00+00:00",
   unique_id: "example-automation",
+  edit_id: "example-automation",
   disabled: false,
   platform: "automation",
 }, {
@@ -178,6 +179,7 @@ catalogPanel._automationScripts = [{
   max: 10,
   last_triggered: null,
   unique_id: "example_script",
+  edit_id: "example_script",
   disabled: false,
   platform: "script",
 }];
@@ -185,8 +187,17 @@ catalogPanel._renderAutomationCategory();
 if (!catalogPanel.shadowRoot.innerHTML.includes("Export automation YAML")) {
   throw new Error("Automations category did not render its YAML export");
 }
+if (!catalogPanel.shadowRoot.innerHTML.includes("Export all YAML package (ZIP)")) {
+  throw new Error("Automations category did not render its ZIP package export");
+}
 if (!catalogPanel.shadowRoot.innerHTML.includes("Example automation")) {
   throw new Error("Automations category did not render automations");
+}
+
+catalogPanel._category = "scripts";
+catalogPanel._renderAutomationCategory();
+if (!catalogPanel.shadowRoot.innerHTML.includes("Example script")) {
+  throw new Error("Scripts category did not render scripts separately");
 }
 
 const sanitizedConfiguration = catalogPanel._redactConfiguration({
@@ -200,6 +211,43 @@ if (sanitizedConfiguration.api_key !== "REDACTED" || sanitizedConfiguration.nest
 const exportedYaml = catalogPanel._yamlValue([{ alias: "Example", token: "REDACTED" }]);
 if (!exportedYaml.includes("token: \"REDACTED\"")) {
   throw new Error("Sanitized configuration could not be serialized as YAML");
+}
+
+async function testZipPackage() {
+  const archive = catalogPanel._createZip([
+    { name: "configuration.yaml", content: "automation: !include automations.yaml\n" },
+    { name: "automations.yaml", content: "[]\n" },
+    { name: "scripts.yaml", content: "{}\n" },
+  ]);
+  const bytes = new Uint8Array(await archive.arrayBuffer());
+  if (bytes[0] !== 0x50 || bytes[1] !== 0x4b || bytes[2] !== 0x03 || bytes[3] !== 0x04) {
+    throw new Error("Automation export package is not a ZIP file");
+  }
+  const zipText = new TextDecoder().decode(bytes);
+  for (const name of ["configuration.yaml", "automations.yaml", "scripts.yaml"]) {
+    if (!zipText.includes(name)) throw new Error(`Automation ZIP package is missing ${name}`);
+  }
+}
+
+function testEditorNavigation() {
+  const previousHistory = global.history;
+  const previousDispatchEvent = global.dispatchEvent;
+  let path = null;
+  global.history = { pushState(_state, _title, value) { path = value; } };
+  global.dispatchEvent = () => {};
+  try {
+    catalogPanel._openAutomationEditor({
+      entity_id: "automation.example_automation",
+      kind: "automation",
+      edit_id: "example-automation",
+    });
+    if (path !== "/config/automation/edit/example-automation") {
+      throw new Error("Automation item did not navigate to its native editor");
+    }
+  } finally {
+    global.history = previousHistory;
+    global.dispatchEvent = previousDispatchEvent;
+  }
 }
 
 for (const invalidPayload of ["not-json", "{}", '{"name":"Only a name"}']) {
@@ -319,7 +367,8 @@ function testCameraWaitTimeout() {
 }
 
 testCameraWaitTimeout();
-testCameraRequestUsesTheOriginalTap().catch((error) => {
+testEditorNavigation();
+testZipPackage().then(testCameraRequestUsesTheOriginalTap).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

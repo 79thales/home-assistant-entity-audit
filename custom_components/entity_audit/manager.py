@@ -445,6 +445,11 @@ class EntityAuditManager:
                 last_triggered = attributes.get("last_triggered")
                 if hasattr(last_triggered, "isoformat"):
                     last_triggered = last_triggered.isoformat()
+                edit_id = attributes.get("id") or (
+                    entry.unique_id if entry else None
+                )
+                if kind == "script" and not edit_id:
+                    edit_id = entity_id.partition(".")[2]
                 result.append(
                     {
                         "entity_id": entity_id,
@@ -456,6 +461,7 @@ class EntityAuditManager:
                         "max": attributes.get("max"),
                         "last_triggered": last_triggered,
                         "unique_id": entry.unique_id if entry else None,
+                        "edit_id": str(edit_id) if edit_id else None,
                         "disabled": bool(entry and entry.disabled),
                         "platform": entry.platform if entry else kind,
                     }
