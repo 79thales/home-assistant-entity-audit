@@ -168,6 +168,8 @@ catalogPanel._automationScripts = [{
   unique_id: "example-automation",
   edit_id: "example-automation",
   disabled: false,
+  automation_enabled: true,
+  status: "enabled",
   platform: "automation",
 }, {
   name: "Example script",
@@ -181,6 +183,8 @@ catalogPanel._automationScripts = [{
   unique_id: "example_script",
   edit_id: "example_script",
   disabled: false,
+  automation_enabled: null,
+  status: "idle",
   platform: "script",
 }];
 catalogPanel._renderAutomationCategory();
@@ -189,6 +193,9 @@ if (!catalogPanel.shadowRoot.innerHTML.includes("Export automation YAML")) {
 }
 if (!catalogPanel.shadowRoot.innerHTML.includes("Export all YAML package (ZIP)")) {
   throw new Error("Automations category did not render its ZIP package export");
+}
+if (!catalogPanel.shadowRoot.innerHTML.includes("Export configuration.yaml")) {
+  throw new Error("Automations category did not render its configuration YAML export");
 }
 if (!catalogPanel.shadowRoot.innerHTML.includes("Example automation")) {
   throw new Error("Automations category did not render automations");
@@ -211,6 +218,20 @@ if (sanitizedConfiguration.api_key !== "REDACTED" || sanitizedConfiguration.nest
 const exportedYaml = catalogPanel._yamlValue([{ alias: "Example", token: "REDACTED" }]);
 if (!exportedYaml.includes("token: \"REDACTED\"")) {
   throw new Error("Sanitized configuration could not be serialized as YAML");
+}
+const automationSnapshot = catalogPanel._automationYaml([{
+  item: catalogPanel._automationScripts[0],
+  config: { alias: "Example automation" },
+}]);
+if (!automationSnapshot.includes("# Entity Audit status at export: enabled")) {
+  throw new Error("Automation YAML does not identify the current enabled status");
+}
+if (catalogPanel._automationExportStatus({ kind: "automation", state: "off", automation_enabled: false }) !== "disabled") {
+  throw new Error("Automation export status does not identify disabled automations");
+}
+const configurationInclude = catalogPanel._configurationIncludeYaml();
+if (!configurationInclude.includes("automation: !include automations.yaml") || !configurationInclude.includes("script: !include scripts.yaml")) {
+  throw new Error("Configuration YAML export is missing include directives");
 }
 
 async function testZipPackage() {

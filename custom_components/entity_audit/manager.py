@@ -6,7 +6,7 @@ import json
 from datetime import timedelta
 from typing import Any
 
-from homeassistant.const import EVENT_STATE_CHANGED
+from homeassistant.const import EVENT_STATE_CHANGED, STATE_OFF, STATE_ON
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
@@ -450,6 +450,19 @@ class EntityAuditManager:
                 )
                 if kind == "script" and not edit_id:
                     edit_id = entity_id.partition(".")[2]
+                registry_disabled = bool(entry and entry.disabled)
+                automation_enabled: bool | None = None
+                status = state.state if state else "missing"
+                if kind == "automation":
+                    if registry_disabled:
+                        status = "registry_disabled"
+                        automation_enabled = False
+                    elif state and state.state == STATE_ON:
+                        status = "enabled"
+                        automation_enabled = True
+                    elif state and state.state == STATE_OFF:
+                        status = "disabled"
+                        automation_enabled = False
                 result.append(
                     {
                         "entity_id": entity_id,
@@ -462,7 +475,9 @@ class EntityAuditManager:
                         "last_triggered": last_triggered,
                         "unique_id": entry.unique_id if entry else None,
                         "edit_id": str(edit_id) if edit_id else None,
-                        "disabled": bool(entry and entry.disabled),
+                        "disabled": registry_disabled,
+                        "automation_enabled": automation_enabled,
+                        "status": status,
                         "platform": entry.platform if entry else kind,
                     }
                 )
