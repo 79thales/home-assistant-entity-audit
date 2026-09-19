@@ -1839,6 +1839,35 @@ class EntityAuditPanel extends HTMLElement {
     return lines.slice(0, maxLines);
   }
 
+  _canvasTextLines(context, value, maxWidth, maxLines) {
+    const text = String(value ?? "").trim();
+    if (!text) return { lines: ["—"], complete: true };
+    const lines = [];
+    let line = "";
+    for (const character of Array.from(text)) {
+      const candidate = line + character;
+      if (line && context.measureText(candidate).width > maxWidth) {
+        lines.push(line.trimEnd());
+        if (lines.length === maxLines) return { lines, complete: false };
+        line = character.trimStart();
+      } else {
+        line = candidate;
+      }
+    }
+    if (line || !lines.length) lines.push(line.trimEnd() || "—");
+    return { lines: lines.slice(0, maxLines), complete: true };
+  }
+
+  _fitTronicTitle(context, value, maxWidth, maxLines, maximumSize, minimumSize) {
+    for (let size = maximumSize; size >= minimumSize; size -= 1) {
+      context.font = `700 ${size}px Arial, sans-serif`;
+      const wrapped = this._canvasTextLines(context, value, maxWidth, maxLines);
+      if (wrapped.complete) return { ...wrapped, size };
+    }
+    context.font = `700 ${minimumSize}px Arial, sans-serif`;
+    return { ...this._canvasTextLines(context, value, maxWidth, maxLines), size: minimumSize };
+  }
+
   _drawPdfLabel(context, x, y, width, height, entity, variant) {
     const padding = Math.max(10, Math.round(Math.min(width, height) * 0.06));
     const titleSize = Math.max(14, Math.min(28, Math.round(height * 0.105)));
@@ -1872,12 +1901,20 @@ class EntityAuditPanel extends HTMLElement {
       : 0;
     const textWidth = width - (padding * 2) - (combinedQrSize ? combinedQrSize + padding : 0);
     context.fillStyle = "#111827";
-    context.font = `700 ${titleSize}px Arial, sans-serif`;
-    const titleLines = this._wrapCanvasText(context, entity.device_name || entity.name, textWidth, 2);
-    let cursor = y + padding + titleSize;
-    for (const line of titleLines) {
+    const title = this._fitTronicTitle(
+      context,
+      entity.device_name || entity.name,
+      textWidth,
+      2,
+      titleSize,
+      Math.max(10, Math.round(titleSize * 0.55))
+    );
+    let cursor = y + padding;
+    context.font = `700 ${title.size}px Arial, sans-serif`;
+    for (const line of title.lines) {
+      cursor += title.size;
       context.fillText(line, x + padding, cursor);
-      cursor += Math.round(titleSize * 1.16);
+      cursor += Math.round(title.size * 0.16);
     }
     cursor += Math.max(3, Math.round(height * 0.025));
     context.font = `600 ${textSize}px Arial, sans-serif`;
@@ -1901,7 +1938,7 @@ class EntityAuditPanel extends HTMLElement {
         context,
         this._labelQrPayload(entity),
         x + width - padding - combinedQrSize,
-        y + ((height - combinedQrSize) / 2),
+        y + padding,
         combinedQrSize
       );
     }
@@ -1909,28 +1946,62 @@ class EntityAuditPanel extends HTMLElement {
   }
 
   _drawTronicLabel(context, width, height, entity) {
-    // The supplied TRONIC roll is 14 x 30 mm.  It is too small for a
-    // dependable QR code containing the complete label payload, so this
-    // preset keeps the fields that identify a device when it is installed.
+    // The supplied TRONIC roll is 14 x 30 mm. The active label variant is
+    // honoured, including the QR-only and text-with-QR choices from settings.
     const padding = Math.max(8, Math.round(height * 0.075));
-    const usableWidth = width - (padding * 2);
-    const lines = [
-      { value: entity.device_name || entity.name, size: Math.max(16, Math.round(height * 0.15)), weight: 700 },
-      { value: `IP ${entity.ip_address}`, size: Math.max(14, Math.round(height * 0.12)), weight: 700 },
-      { value: `MAC ${entity.mac_address || "not available"}`, size: Math.max(10, Math.round(height * 0.085)), weight: 600 },
-      { value: entity.area_name || entity.manufacturer || "", size: Math.max(10, Math.round(height * 0.08)), weight: 500 },
-    ].filter((line) => line.value);
+    const variant = this._labelVariant;
+    const qrSize = height - (padding * 2);
 
     context.save();
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, width, height);
     context.fillStyle = "#000000";
+
+    if (variant === "qr") {
+      this._drawQr(context, this._labelQrPayload(entity), padding, padding, qrSize);
+      context.restore();
+      return;
+    }
+
+    const hasQr = variant === "text_qr";
+    const usableWidth = width - (padding * 2) - (hasQr ? qrSize + padding : 0);
+    const title = this._fitTronicTitle(
+      context,
+      entity.device_name || entity.name,
+      usableWidth,
+      2,
+      hasQr ? Math.max(11, Math.round(height * 0.13)) : Math.max(18, Math.round(height * 0.16)),
+      hasQr ? 6 : 8
+    );
     let cursor = padding;
-    for (const line of lines) {
-      context.font = `${line.weight} ${line.size}px Arial, sans-serif`;
-      cursor += line.size;
-      context.fillText(this._truncateCanvasText(context, line.value, usableWidth), padding, cursor);
-      cursor += Math.max(2, Math.round(line.size * 0.16));
+    context.font = `700 ${title.size}px Arial, sans-serif`;
+    for (const line of title.lines) {
+      cursor += title.size;
+      context.fillText(line, padding, cursor);
+      cursor += Math.max(1, Math.round(title.size * 0.1));
+    }
+    context.font = `700 ${hasQr ? 10 : Math.max(15, Math.round(height * 0.11))}px Arial, sans-serif`;
+    cursor += hasQr ? 9 : Math.max(15, Math.round(height * 0.11));
+    context.fillText(this._truncateCanvasText(context, `IP ${entity.ip_address}`, usableWidth), padding, cursor);
+    if (!hasQr) {
+      context.font = `600 ${Math.max(10, Math.round(height * 0.08))}px Arial, sans-serif`;
+      cursor += Math.max(12, Math.round(height * 0.1));
+      context.fillText(this._truncateCanvasText(context, `MAC ${entity.mac_address || "not available"}`, usableWidth), padding, cursor);
+      const location = entity.area_name || entity.manufacturer || "";
+      if (location) {
+        context.font = `500 ${Math.max(10, Math.round(height * 0.075))}px Arial, sans-serif`;
+        cursor += Math.max(11, Math.round(height * 0.09));
+        context.fillText(this._truncateCanvasText(context, location, usableWidth), padding, cursor);
+      }
+    }
+    if (hasQr) {
+      this._drawQr(
+        context,
+        this._labelQrPayload(entity),
+        width - padding - qrSize,
+        padding,
+        qrSize
+      );
     }
     context.restore();
   }
@@ -2081,6 +2152,7 @@ class EntityAuditPanel extends HTMLElement {
     this._buildingLabels = true;
     this._render();
     try {
+      if (this._labelVariant !== "text") await this._loadQrLibrary();
       const blob = this._buildTronicLabelsPdf(devices);
       this._revokeLabelPdf();
       this._labelPdf = {
@@ -2762,6 +2834,6 @@ class EntityAuditPanel extends HTMLElement {
   }
 }
 
-if (!customElements.get("entity-audit-panel-v0323")) {
-  customElements.define("entity-audit-panel-v0323", EntityAuditPanel);
+if (!customElements.get("entity-audit-panel-v0324")) {
+  customElements.define("entity-audit-panel-v0324", EntityAuditPanel);
 }

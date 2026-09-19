@@ -39,6 +39,25 @@ if (JSON.stringify(JSON.parse(payload)) !== JSON.stringify(labelData)) {
   throw new Error("QR payload does not contain the complete label data");
 }
 
+const textContext = {
+  font: "700 24px Arial, sans-serif",
+  measureText(value) {
+    const size = Number(this.font.match(/(\d+)px/)?.[1] || 12);
+    return { width: Array.from(String(value)).length * size * 0.55 };
+  },
+};
+const longTitle = panel._fitTronicTitle(
+  textContext,
+  "Android_e9a3d16ba2834b5b_device_tracker",
+  200,
+  2,
+  24,
+  8
+);
+if (!longTitle.complete || longTitle.lines.length > 2 || longTitle.lines.join("") !== "Android_e9a3d16ba2834b5b_device_tracker") {
+  throw new Error("Long thermal-label titles must wrap or reduce their font without truncation");
+}
+
 const code = qrcode(0, "M");
 code.addData(payload, "Byte");
 code.make();
