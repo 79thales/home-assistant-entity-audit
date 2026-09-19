@@ -1908,6 +1908,33 @@ class EntityAuditPanel extends HTMLElement {
     context.restore();
   }
 
+  _drawTronicLabel(context, width, height, entity) {
+    // The supplied TRONIC roll is 14 x 30 mm.  It is too small for a
+    // dependable QR code containing the complete label payload, so this
+    // preset keeps the fields that identify a device when it is installed.
+    const padding = Math.max(8, Math.round(height * 0.075));
+    const usableWidth = width - (padding * 2);
+    const lines = [
+      { value: entity.device_name || entity.name, size: Math.max(16, Math.round(height * 0.15)), weight: 700 },
+      { value: `IP ${entity.ip_address}`, size: Math.max(14, Math.round(height * 0.12)), weight: 700 },
+      { value: `MAC ${entity.mac_address || "not available"}`, size: Math.max(10, Math.round(height * 0.085)), weight: 600 },
+      { value: entity.area_name || entity.manufacturer || "", size: Math.max(10, Math.round(height * 0.08)), weight: 500 },
+    ].filter((line) => line.value);
+
+    context.save();
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
+    context.fillStyle = "#000000";
+    let cursor = padding;
+    for (const line of lines) {
+      context.font = `${line.weight} ${line.size}px Arial, sans-serif`;
+      cursor += line.size;
+      context.fillText(this._truncateCanvasText(context, line.value, usableWidth), padding, cursor);
+      cursor += Math.max(2, Math.round(line.size * 0.16));
+    }
+    context.restore();
+  }
+
   _buildLabelsPdf(devices, labelWidth, labelHeight) {
     const dpi = 150;
     const pageWidth = 1240;
@@ -1946,7 +1973,29 @@ class EntityAuditPanel extends HTMLElement {
     return this._assemblePdf(pages, pageWidth, pageHeight);
   }
 
-  _assemblePdf(pageImages, imageWidth, imageHeight) {
+  _buildTronicLabelsPdf(devices) {
+    const dpi = 300;
+    const labelWidthMm = 30;
+    const labelHeightMm = 14;
+    const pageWidth = Math.round((labelWidthMm / 25.4) * dpi);
+    const pageHeight = Math.round((labelHeightMm / 25.4) * dpi);
+    const pages = devices.map((entity) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = pageWidth;
+      canvas.height = pageHeight;
+      this._drawTronicLabel(canvas.getContext("2d"), pageWidth, pageHeight, entity);
+      return this._dataUrlToBytes(canvas.toDataURL("image/jpeg", 0.96));
+    });
+    return this._assemblePdf(
+      pages,
+      pageWidth,
+      pageHeight,
+      (labelWidthMm / 25.4) * 72,
+      (labelHeightMm / 25.4) * 72
+    );
+  }
+
+  _assemblePdf(pageImages, imageWidth, imageHeight, pageWidthPoints = 595.28, pageHeightPoints = 841.89) {
     const encoder = new TextEncoder();
     const chunks = [];
     const offsets = [];
@@ -1974,8 +2023,8 @@ class EntityAuditPanel extends HTMLElement {
       const pageObject = 3 + (index * 3);
       const contentObject = pageObject + 1;
       const imageObject = pageObject + 2;
-      const content = `q\n595.28 0 0 841.89 0 0 cm\n/Im0 Do\nQ\n`;
-      appendObject(pageObject, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /XObject << /Im0 ${imageObject} 0 R >> >> /Contents ${contentObject} 0 R >>`);
+      const content = `q\n${pageWidthPoints} 0 0 ${pageHeightPoints} 0 0 cm\n/Im0 Do\nQ\n`;
+      appendObject(pageObject, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidthPoints} ${pageHeightPoints}] /Resources << /XObject << /Im0 ${imageObject} 0 R >> >> /Contents ${contentObject} 0 R >>`);
       appendObject(contentObject, `<< /Length ${encoder.encode(content).length} >>\nstream\n${content}endstream`);
       offsets[imageObject] = length;
       appendText(`${imageObject} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${imageWidth} /Height ${imageHeight} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${image.length} >>\nstream\n`);
@@ -2010,11 +2059,41 @@ class EntityAuditPanel extends HTMLElement {
         blob,
         filename: `entity-audit-labels-${new Date().toISOString().slice(0, 10)}.pdf`,
         url: URL.createObjectURL(blob),
+        readyMessage: "The label PDF is ready.",
+        shareTitle: "Device labels",
       };
       this._recordActivity("labels_pdf_created", "info", String(devices.length));
     } catch (error) {
       alert("The PDF with QR codes could not be created.");
       this._recordActivity("labels_pdf_failed", "error", error?.name || "build_failed");
+    } finally {
+      this._buildingLabels = false;
+      this._render();
+    }
+  }
+
+  async _downloadTronicLabelsPdf(rows) {
+    const devices = this._labelDevices(rows);
+    if (!devices.length) {
+      alert("None of the displayed devices has an available IP address.");
+      return;
+    }
+    this._buildingLabels = true;
+    this._render();
+    try {
+      const blob = this._buildTronicLabelsPdf(devices);
+      this._revokeLabelPdf();
+      this._labelPdf = {
+        blob,
+        filename: `entity-audit-tronic-30x14mm-${new Date().toISOString().slice(0, 10)}.pdf`,
+        url: URL.createObjectURL(blob),
+        readyMessage: "The TRONIC 30 × 14 mm label PDF is ready.",
+        shareTitle: "TRONIC device labels",
+      };
+      this._recordActivity("labels_pdf_created", "info", `tronic_30x14:${devices.length}`);
+    } catch (error) {
+      alert("The TRONIC label PDF could not be created.");
+      this._recordActivity("labels_pdf_failed", "error", error?.name || "tronic_build_failed");
     } finally {
       this._buildingLabels = false;
       this._render();
@@ -2028,7 +2107,7 @@ class EntityAuditPanel extends HTMLElement {
     try {
       await navigator.share({
         files: [file],
-        title: "Device labels",
+        title: this._labelPdf.shareTitle || "Device labels",
       });
       this._recordActivity("labels_pdf_shared");
     } catch (error) {
@@ -2570,14 +2649,16 @@ class EntityAuditPanel extends HTMLElement {
           <div class="stat"><b>${this._entities.filter((e) => e.logging).length}</b>${"audited"}</div>
           <div class="stat"><b>${problemCount}</b>${"current problems"}</div>
         </section>
-        ${this._labelPdf ? `<section class="pdf-ready"><span>${"The label PDF is ready."}</span><a id="download-label-pdf" href="${this._escape(this._labelPdf.url)}" download="${this._escape(this._labelPdf.filename)}">${"Open or save PDF"}</a>${navigator.canShare && navigator.share ? `<button id="share-label-pdf">${"Share PDF"}</button>` : ""}<button id="discard-label-pdf">✕</button></section>` : ""}
+        ${this._labelPdf ? `<section class="pdf-ready"><span>${this._escape(this._labelPdf.readyMessage || "The label PDF is ready.")}</span><a id="download-label-pdf" href="${this._escape(this._labelPdf.url)}" download="${this._escape(this._labelPdf.filename)}">${"Open or save PDF"}</a>${navigator.canShare && navigator.share ? `<button id="share-label-pdf">${"Share PDF"}</button>` : ""}<button id="discard-label-pdf">✕</button></section>` : ""}
         <section class="filter-panel ${this._filtersOpen ? "open" : ""}">
           <div class="toolbar">
             <button id="bulk-enable">${"Audit displayed"}</button>
             <button id="bulk-disable">${"Disable audit"}</button>
             <button id="export">${"Export CSV"}</button>
             <button id="download-labels" ${this._buildingLabels ? "disabled" : ""}>${this._buildingLabels ? "Creating PDF…" : "Create labels (PDF)"}</button>
+            <button id="download-tronic-labels" ${this._buildingLabels ? "disabled" : ""}>${this._buildingLabels ? "Creating PDF…" : "Create TRONIC 30 × 14 mm PDF"}</button>
           </div>
+          <p class="privacy-note">TRONIC 30 × 14 mm creates one compact PDF page per device for the 14 × 30 mm label roll. It contains the device name, IP address, MAC address, and area. Use Open or save PDF / Share PDF to send it to the printer app; direct Bluetooth printing from this browser panel is not supported.</p>
           <div class="filters">
           <select id="device-filter" class="device-filter" aria-label="${"Filter by device"}">
             <option value="">${"All devices"}</option>
@@ -2669,6 +2750,7 @@ class EntityAuditPanel extends HTMLElement {
     this.shadowRoot.querySelector("#bulk-disable")?.addEventListener("click", () => this._bulkSet(rows, false));
     this.shadowRoot.querySelector("#export")?.addEventListener("click", () => this._exportCsv(rows));
     this.shadowRoot.querySelector("#download-labels")?.addEventListener("click", () => this._downloadLabelsPdf(rows));
+    this.shadowRoot.querySelector("#download-tronic-labels")?.addEventListener("click", () => this._downloadTronicLabelsPdf(rows));
     this.shadowRoot.querySelector("#share-label-pdf")?.addEventListener("click", () => this._shareLabelPdf());
     this.shadowRoot.querySelector("#discard-label-pdf")?.addEventListener("click", () => { this._revokeLabelPdf(); this._render(); });
     this.shadowRoot.querySelectorAll(".toggle").forEach((input) => input.addEventListener("change", () => this._toggle(rows[Number(input.dataset.index)], input.checked)));
@@ -2680,6 +2762,6 @@ class EntityAuditPanel extends HTMLElement {
   }
 }
 
-if (!customElements.get("entity-audit-panel-v0322")) {
-  customElements.define("entity-audit-panel-v0322", EntityAuditPanel);
+if (!customElements.get("entity-audit-panel-v0323")) {
+  customElements.define("entity-audit-panel-v0323", EntityAuditPanel);
 }

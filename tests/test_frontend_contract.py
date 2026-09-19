@@ -68,6 +68,11 @@ class FrontendContractTest(unittest.TestCase):
         frontend = FRONTEND_FILE.read_text(encoding="utf-8")
 
         self.assertIn('id="download-labels"', frontend)
+        self.assertIn('id="download-tronic-labels"', frontend)
+        self.assertIn("_buildTronicLabelsPdf", frontend)
+        self.assertIn("labelWidthMm = 30", frontend)
+        self.assertIn("labelHeightMm = 14", frontend)
+        self.assertIn("direct Bluetooth printing from this browser panel is not supported", frontend)
         self.assertIn("!entity.device_id || !entity.ip_address", frontend)
         self.assertIn("devices.get(entity.ip_address)", frontend)
         self.assertIn("devices.set(entity.ip_address, entity)", frontend)

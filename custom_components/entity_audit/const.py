@@ -1,7 +1,7 @@
 """Constants for Entity Audit."""
 
 DOMAIN = "entity_audit"
-INTEGRATION_VERSION = "0.3.22"
+INTEGRATION_VERSION = "0.3.23"
 BACKUP_EXPORT_FORMAT_VERSION = 1
 STORAGE_KEY = f"{DOMAIN}.storage"
 STORAGE_VERSION = 1
@@ -68,5 +68,5 @@ PROBLEM_STATES = {"unavailable", "unknown"}
 PANEL_URL = "/entity_audit/entity-audit-panel.js"
 QR_LIBRARY_URL = "/entity_audit/qrcode.js"
 QR_READER_LIBRARY_URL = "/entity_audit/jsQR.js"
-PANEL_MODULE_URL = f"{PANEL_URL}?v=0.3.22"
-PANEL_ELEMENT = "entity-audit-panel-v0322"
+PANEL_MODULE_URL = f"{PANEL_URL}?v=0.3.23"
+PANEL_ELEMENT = "entity-audit-panel-v0323"
