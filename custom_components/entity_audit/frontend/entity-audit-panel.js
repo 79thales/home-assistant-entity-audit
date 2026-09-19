@@ -1983,16 +1983,14 @@ class EntityAuditPanel extends HTMLElement {
     context.font = `700 ${hasQr ? 10 : Math.max(15, Math.round(height * 0.11))}px Arial, sans-serif`;
     cursor += hasQr ? 9 : Math.max(15, Math.round(height * 0.11));
     context.fillText(this._truncateCanvasText(context, `IP ${entity.ip_address}`, usableWidth), padding, cursor);
-    if (!hasQr) {
-      context.font = `600 ${Math.max(10, Math.round(height * 0.08))}px Arial, sans-serif`;
-      cursor += Math.max(12, Math.round(height * 0.1));
-      context.fillText(this._truncateCanvasText(context, `MAC ${entity.mac_address || "not available"}`, usableWidth), padding, cursor);
-      const location = entity.area_name || entity.manufacturer || "";
-      if (location) {
-        context.font = `500 ${Math.max(10, Math.round(height * 0.075))}px Arial, sans-serif`;
-        cursor += Math.max(11, Math.round(height * 0.09));
-        context.fillText(this._truncateCanvasText(context, location, usableWidth), padding, cursor);
-      }
+    context.font = `600 ${hasQr ? 8 : Math.max(10, Math.round(height * 0.08))}px Arial, sans-serif`;
+    cursor += hasQr ? 9 : Math.max(12, Math.round(height * 0.1));
+    context.fillText(this._truncateCanvasText(context, `MAC ${entity.mac_address || "not available"}`, usableWidth), padding, cursor);
+    const location = entity.area_name || entity.manufacturer || "";
+    if (location) {
+      context.font = `500 ${hasQr ? 8 : Math.max(10, Math.round(height * 0.075))}px Arial, sans-serif`;
+      cursor += hasQr ? 9 : Math.max(11, Math.round(height * 0.09));
+      context.fillText(this._truncateCanvasText(context, location, usableWidth), padding, cursor);
     }
     if (hasQr) {
       this._drawQr(
@@ -2834,6 +2832,6 @@ class EntityAuditPanel extends HTMLElement {
   }
 }
 
-if (!customElements.get("entity-audit-panel-v0324")) {
-  customElements.define("entity-audit-panel-v0324", EntityAuditPanel);
+if (!customElements.get("entity-audit-panel-v0325")) {
+  customElements.define("entity-audit-panel-v0325", EntityAuditPanel);
 }
