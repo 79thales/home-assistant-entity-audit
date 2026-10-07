@@ -1,6 +1,7 @@
 {
   "name": "Entity Audit",
   "homeassistant": "2025.7.0",
+  "render_readme": true,
   "zip_release": true,
   "filename": "entity_audit.zip"
 }

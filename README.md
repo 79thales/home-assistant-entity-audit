@@ -11,6 +11,8 @@
   <img src="https://raw.githubusercontent.com/79thales/home-assistant-entity-audit/master/brand/icon@2x.png" alt="Entity Audit" width="180">
 </p>
 
+HACS displays documentation for the installed version. The unified header is included from v0.3.28. Update this repository in HACS to see it; refreshing the page or updating only the default branch does not change an older release's README.
+
 Entity Audit is a HACS-compatible custom integration that gives administrators one searchable view of all Home Assistant entities. Auditing is opt-in per entity: only selected state changes are stored by this integration.
 
 ## Features
