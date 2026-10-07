@@ -1,12 +1,15 @@
-<p align="center">
-  <img src="brand/icon@2x.png" alt="Entity Audit icon" width="192">
-</p>
-
 # Entity Audit for Home Assistant
 
-[![Latest release](https://img.shields.io/github/v/release/79thales/home-assistant-entity-audit?logo=github)](https://github.com/79thales/home-assistant-entity-audit/releases/latest)
-[![Installer downloads, all releases](https://img.shields.io/github/downloads/79thales/home-assistant-entity-audit/entity_audit.zip?label=Downloads%20total&displayAssetName=false)](https://github.com/79thales/home-assistant-entity-audit/releases)
-[![Installer downloads, latest release](https://img.shields.io/github/downloads/79thales/home-assistant-entity-audit/latest/entity_audit.zip?label=Downloads%20latest&displayAssetName=false)](https://github.com/79thales/home-assistant-entity-audit/releases/latest)
+[![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.7.0%2B-41BDF5?logo=home-assistant&logoColor=white&style=flat)](https://www.home-assistant.io/)
+[![HACS Integration](https://img.shields.io/badge/HACS-Integration-41BDF5?logo=home-assistant-community-store&logoColor=white&style=flat)](https://my.home-assistant.io/redirect/hacs_repository/?owner=79thales&repository=home-assistant-entity-audit&category=integration)
+[![Latest release](https://img.shields.io/github/v/release/79thales/home-assistant-entity-audit?label=Release&logo=github&style=flat)](https://github.com/79thales/home-assistant-entity-audit/releases/latest)
+[![Installer downloads, all releases](https://img.shields.io/github/downloads/79thales/home-assistant-entity-audit/entity_audit.zip?label=Downloads%20total&displayAssetName=false&logo=github&style=flat)](https://github.com/79thales/home-assistant-entity-audit/releases)
+[![Installer downloads, latest release](https://img.shields.io/github/downloads/79thales/home-assistant-entity-audit/latest/entity_audit.zip?label=Downloads%20latest&displayAssetName=false&logo=github&style=flat)](https://github.com/79thales/home-assistant-entity-audit/releases/latest)
+[![Validation](https://img.shields.io/github/check-suites/79thales/home-assistant-entity-audit/master?label=Validation&logo=github&style=flat)](https://github.com/79thales/home-assistant-entity-audit/actions)
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/79thales/home-assistant-entity-audit/master/brand/icon@2x.png" alt="Entity Audit" width="180">
+</p>
 
 Entity Audit is a HACS-compatible custom integration that gives administrators one searchable view of all Home Assistant entities. Auditing is opt-in per entity: only selected state changes are stored by this integration.
 
