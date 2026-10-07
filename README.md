@@ -4,6 +4,10 @@
 
 # Entity Audit for Home Assistant
 
+[![Latest release](https://img.shields.io/github/v/release/79thales/home-assistant-entity-audit?logo=github)](https://github.com/79thales/home-assistant-entity-audit/releases/latest)
+[![Installer downloads, all releases](https://img.shields.io/github/downloads/79thales/home-assistant-entity-audit/entity_audit.zip?label=Downloads%20total&displayAssetName=false)](https://github.com/79thales/home-assistant-entity-audit/releases)
+[![Installer downloads, latest release](https://img.shields.io/github/downloads/79thales/home-assistant-entity-audit/latest/entity_audit.zip?label=Downloads%20latest&displayAssetName=false)](https://github.com/79thales/home-assistant-entity-audit/releases/latest)
+
 Entity Audit is a HACS-compatible custom integration that gives administrators one searchable view of all Home Assistant entities. Auditing is opt-in per entity: only selected state changes are stored by this integration.
 
 ## Features
@@ -47,6 +51,12 @@ Device grouping uses the direct device assigned to an entity in the entity regis
 ## Installation through HACS
 
 Until the repository is accepted into the HACS default catalog, add `https://github.com/79thales/home-assistant-entity-audit` under **HACS → Integrations → Custom repositories**, choose the **Integration** category, and install it.
+
+### Installer downloads
+
+From v0.3.26, HACS installs the `entity_audit.zip` release asset, including the bundled frontend, QR libraries, their licenses, translations and brand files. For manual installation, extract its contents directly into `custom_components/entity_audit`, with `manifest.json` at that directory's root. GitHub's automatic **Source code (zip)** archive has a different layout. Older releases retain their original installation method.
+
+The badges count only installer downloads, including updates and repeated manual downloads, not unique users or active installations. HACS's indicator covers the selected release; the total badge combines installer downloads across releases. Source-code archives, default-branch installations, inventory exports and configuration backups are not counted. Earlier downloads cannot be reconstructed, and cached counts may take time to refresh. No inventory data or usage telemetry is sent by the integration for these counters. See [release packaging](scripts/README.md) for the maintainer workflow.
 
 ## Storage and privacy
 
