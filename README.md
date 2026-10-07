@@ -54,7 +54,7 @@ Until the repository is accepted into the HACS default catalog, add `https://git
 
 ### Installer downloads
 
-From v0.3.26, HACS installs the `entity_audit.zip` release asset, including the bundled frontend, QR libraries, their licenses, translations and brand files. For manual installation, extract its contents directly into `custom_components/entity_audit`, with `manifest.json` at that directory's root. GitHub's automatic **Source code (zip)** archive has a different layout. Older releases retain their original installation method.
+From v0.3.27, HACS installs the `entity_audit.zip` release asset, including the bundled frontend, QR libraries, their licenses, translations and brand files. For manual installation, extract its contents directly into `custom_components/entity_audit`, with `manifest.json` at that directory's root. GitHub's automatic **Source code (zip)** archive has a different layout. Older releases retain their original installation method.
 
 The badges count only installer downloads, including updates and repeated manual downloads, not unique users or active installations. HACS's indicator covers the selected release; the total badge combines installer downloads across releases. Source-code archives, default-branch installations, inventory exports and configuration backups are not counted. Earlier downloads cannot be reconstructed, and cached counts may take time to refresh. No inventory data or usage telemetry is sent by the integration for these counters. See [release packaging](scripts/README.md) for the maintainer workflow.
 
