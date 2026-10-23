@@ -11,7 +11,9 @@
           "camera_wait_seconds": "Camera startup timeout (seconds)",
           "label_width_mm": "Device label width (mm)",
           "label_height_mm": "Device label height (mm)",
-          "label_variant": "Device label variant"
+          "label_variant": "Device label variant",
+          "brother_ql_host": "QL-820NWB IP address or hostname (optional, TCP 9100)",
+          "brother_vc_host": "VC-500W IP address or hostname (optional, TCP 9100)"
         }
       }
     },
@@ -32,6 +34,8 @@
           "label_width_mm": "Device label width (mm)",
           "label_height_mm": "Device label height (mm)",
           "label_variant": "Device label variant",
+          "brother_ql_host": "QL-820NWB IP address or hostname (optional, TCP 9100)",
+          "brother_vc_host": "VC-500W IP address or hostname (optional, TCP 9100)",
           "clear_activity_history": "Clear action and error history now"
         }
       }

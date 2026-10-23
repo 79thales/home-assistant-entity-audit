@@ -9,6 +9,8 @@ from homeassistant.core import callback
 
 from .const import (
     CONF_ACTIVITY_LOG_ENABLED,
+    CONF_BROTHER_QL_HOST,
+    CONF_BROTHER_VC_HOST,
     CONF_CAMERA_WAIT_SECONDS,
     CONF_CLEAR_ACTIVITY_HISTORY,
     CONF_LABEL_HEIGHT,
@@ -25,6 +27,16 @@ from .const import (
     DEFAULT_RETENTION_DAYS,
     DOMAIN,
 )
+from .printing import PrintError, printer_host
+
+
+def _printer_host(value: str) -> str:
+    """Validate an optional LAN printer address without contacting the device."""
+    try:
+        return printer_host(value)
+    except PrintError as error:
+        raise vol.Invalid(str(error)) from error
+
 
 class EntityAuditConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Configure Entity Audit."""
@@ -80,6 +92,8 @@ class EntityAuditConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 default=values.get(CONF_LABEL_VARIANT, DEFAULT_LABEL_VARIANT),
             ): vol.In(["text", "text_qr", "qr"]),
         }
+        for key in (CONF_BROTHER_QL_HOST, CONF_BROTHER_VC_HOST):
+            schema[vol.Optional(key, default=values.get(key, ""))] = vol.All(str, _printer_host)
         if include_clear_history:
             schema[vol.Optional(CONF_CLEAR_ACTIVITY_HISTORY, default=False)] = bool
         return vol.Schema(schema)

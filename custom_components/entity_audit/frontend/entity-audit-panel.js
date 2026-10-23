@@ -34,6 +34,13 @@ class EntityAuditPanel extends HTMLElement {
     this._labelWidth = 60;
     this._labelHeight = 38;
     this._labelVariant = "text";
+    this._brotherRoll = "dk_22205";
+    this._brotherPrinter = "ql820nwb";
+    this._brotherLength = 40;
+    this._brotherPrinters = {};
+    this._printingLabels = false;
+    this._printStatus = "";
+    this._stopPrintRun = false;
     this._filtersOpen = false;
     this._labelPdf = null;
     this._qrLibraryPromise = null;
@@ -78,6 +85,7 @@ class EntityAuditPanel extends HTMLElement {
   connectedCallback() { this._render(); }
 
   disconnectedCallback() {
+    this._stopPrintRun = true;
     this._stopScannerCamera();
     this._revokeLabelPdf();
   }
@@ -98,6 +106,7 @@ class EntityAuditPanel extends HTMLElement {
       this._labelWidth = settings.label_width_mm;
       this._labelHeight = settings.label_height_mm;
       this._labelVariant = settings.label_variant;
+      this._brotherPrinters = settings.brother_printers || {};
       this._entityAuditVersion = settings.integration_version || this._entityAuditVersion;
       this._backupExportFormatVersion = settings.backup_export_format_version || this._backupExportFormatVersion;
       if (this._selected) {
@@ -2064,6 +2073,280 @@ class EntityAuditPanel extends HTMLElement {
     );
   }
 
+  _brotherRollOptions() {
+    // Dimensions are physical cross-roll width and feed length in millimetres.
+    // Continuous rolls have no fixed length; PDF generation validates the
+    // user-entered cut length independently of Home Assistant settings.
+    if (this._brotherPrinter === "vc500w") {
+      return [
+        { id: "cz_1005", name: "CZ-1005 — 50 mm continuous", width: 50, length: null },
+        { id: "cz_1004", name: "CZ-1004 — 25 mm continuous", width: 25, length: null },
+        { id: "cz_1003", name: "CZ-1003 — 19 mm continuous", width: 19, length: null },
+        { id: "cz_1002", name: "CZ-1002 — 12 mm continuous", width: 12, length: null },
+        { id: "cz_1001", name: "CZ-1001 — 9 mm continuous", width: 9, length: null },
+      ];
+    }
+    return [
+      { id: "dk_22205", name: "DK-22205 — 62 mm continuous", width: 62, length: null },
+      { id: "dk_22210", name: "DK-22210 — 29 mm continuous", width: 29, length: null },
+      { id: "dk_11209", name: "DK-11209 — 62 × 29 mm", width: 62, length: 29 },
+      { id: "dk_11201", name: "DK-11201 — 29 × 90 mm", width: 29, length: 90 },
+      { id: "dk_11202", name: "DK-11202 — 62 × 100 mm", width: 62, length: 100 },
+    ];
+  }
+
+  _brotherLabelFormat() {
+    const roll = this._brotherRollOptions().find((item) => item.id === this._brotherRoll);
+    if (!roll) throw new Error("Select a supported roll for this Brother printer.");
+    const length = roll.length ?? Number(this._brotherLength);
+    if (!Number.isInteger(length) || (roll.length === null && length < 30) || length > 300) {
+      throw new Error("Enter a label length between 30 and 300 mm.");
+    }
+    if (roll.width < 25 && this._labelVariant !== "text") {
+      throw new Error("Select text-only labels in integration settings for rolls narrower than 25 mm, or choose a wider roll for a readable QR code.");
+    }
+    return { ...roll, length, dpi: this._brotherPrinter === "vc500w" ? 313 : 300 };
+  }
+
+  _drawBrotherLabel(context, width, height, entity) {
+    // Render in landscape for readable text, while keeping the PDF page in
+    // physical roll orientation. Callers rotate portrait media before drawing.
+    // The same full QR payload remains compatible with existing label scanning.
+    const margin = Math.min(24, Math.round(height * 0.07));
+    const variant = this._labelVariant;
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
+    if (height < 240 && variant === "text") {
+      // On narrow CZ tape, use the long axis and two columns for the four
+      // fields. This preserves MAC, manufacturer and area within the height.
+      const title = this._fitTronicTitle(context, entity.device_name || entity.name,
+        width - margin * 2, 2, Math.min(34, Math.round(height * 0.18)), 12);
+      context.fillStyle = "#000000";
+      context.font = `700 ${title.size}px Arial, sans-serif`;
+      let cursor = margin;
+      for (const line of title.lines) {
+        cursor += title.size;
+        context.fillText(line, margin, cursor);
+        cursor += 3;
+      }
+      const columns = [
+        [`IP: ${entity.ip_address}`, `MAC: ${entity.mac_address || "not available"}`],
+        [`Mfr: ${entity.manufacturer || "not available"}`, `Area: ${entity.area_name || "not available"}`],
+      ];
+      const fontSize = Math.min(24, Math.round(height * 0.14));
+      const columnWidth = (width - margin * 3) / 2;
+      context.font = `600 ${fontSize}px Arial, sans-serif`;
+      for (const row of columns) {
+        cursor += fontSize + 3;
+        row.forEach((value, index) => context.fillText(
+          this._truncateCanvasText(context, value, columnWidth),
+          margin + index * (columnWidth + margin), cursor
+        ));
+      }
+      return;
+    }
+    if (variant === "qr") {
+      const size = Math.min(width, height) - margin * 2;
+      this._drawQr(context, this._labelQrPayload(entity), (width - size) / 2, (height - size) / 2, size);
+      return;
+    }
+    const qrSize = variant === "text_qr" ? Math.min(height - margin * 2, Math.floor(width * 0.38)) : 0;
+    const textWidth = width - margin * 2 - (qrSize ? qrSize + margin : 0);
+    const title = this._fitTronicTitle(context, entity.device_name || entity.name, textWidth, 2, 42, 18);
+    context.fillStyle = "#000000";
+    context.font = `700 ${title.size}px Arial, sans-serif`;
+    let cursor = margin;
+    for (const line of title.lines) {
+      cursor += title.size;
+      context.fillText(line, margin, cursor);
+      cursor += 6;
+    }
+    const fields = [
+      `IP: ${entity.ip_address}`,
+      `MAC: ${entity.mac_address || "not available"}`,
+      `Manufacturer: ${entity.manufacturer || "not available"}`,
+      `Area: ${entity.area_name || "not available"}`,
+    ];
+    for (const field of fields) {
+      let size = 26;
+      context.font = `600 ${size}px Arial, sans-serif`;
+      while (size > 14 && context.measureText(field).width > textWidth) {
+        size -= 1;
+        context.font = `600 ${size}px Arial, sans-serif`;
+      }
+      cursor += 32;
+      context.fillText(this._truncateCanvasText(context, field, textWidth), margin, cursor);
+    }
+    if (qrSize) {
+      this._drawQr(context, this._labelQrPayload(entity), width - margin - qrSize, margin, qrSize);
+    }
+  }
+
+  _buildBrotherLabelsPdf(devices, format) {
+    // One raster per device at the printer's resolution (300 / 313 dpi);
+    // PDF MediaBox uses exact millimetres
+    // converted to points. No request is sent to the printer by this export.
+    const width = Math.round(format.width / 25.4 * format.dpi);
+    const height = Math.round(format.length / 25.4 * format.dpi);
+    const pages = devices.map((entity) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      context.save();
+      if (height > width) {
+        context.translate(0, height);
+        context.rotate(-Math.PI / 2);
+        this._drawBrotherLabel(context, height, width, entity);
+      } else {
+        this._drawBrotherLabel(context, width, height, entity);
+      }
+      context.restore();
+      return this._dataUrlToBytes(canvas.toDataURL("image/jpeg", 0.96));
+    });
+    return this._assemblePdf(pages, width, height, format.width / 25.4 * 72, format.length / 25.4 * 72);
+  }
+
+  _packMonochrome(image) {
+    // Packed MSB-first black pixels, one byte-aligned row at a time. Head
+    // offsets and native commands are added by the server, not by the browser.
+    const stride = Math.ceil(image.width / 8);
+    const packed = new Uint8Array(stride * image.height);
+    for (let y = 0; y < image.height; y += 1) {
+      for (let x = 0; x < image.width; x += 1) {
+        const offset = (y * image.width + x) * 4;
+        const brightness = image.data[offset] * 0.299 + image.data[offset + 1] * 0.587 + image.data[offset + 2] * 0.114;
+        if (brightness < 128 && image.data[offset + 3] >= 128) {
+          packed[y * stride + Math.floor(x / 8)] |= 0x80 >> (x % 8);
+        }
+      }
+    }
+    let binary = "";
+    for (let offset = 0; offset < packed.length; offset += 8192) {
+      binary += String.fromCharCode(...packed.subarray(offset, offset + 8192));
+    }
+    return btoa(binary);
+  }
+
+  _brotherDirectImage(entity, format, model) {
+    // QL uses its printable dot rectangle, excluding the native head/feed
+    // margins; VC vivid mode uses 313 cross-web and 317 feed dots per inch.
+    // Both renderers keep the same device fields and complete QR payload.
+    const qlGeometry = {
+      dk_22205: [696, Math.round(format.length / 25.4 * 300) - 70],
+      dk_22210: [306, Math.round(format.length / 25.4 * 300) - 70],
+      dk_11209: [696, 271], dk_11201: [306, 991], dk_11202: [696, 1109],
+    };
+    const [width, height] = model === "ql820nwb" ? qlGeometry[format.id] : [
+      Math.round(format.width / 25.4 * 313), Math.round(format.length / 25.4 * 317),
+    ];
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { willReadFrequently: model === "ql820nwb" });
+    context.save();
+    if (height > width) {
+      context.translate(0, height);
+      context.rotate(-Math.PI / 2);
+      this._drawBrotherLabel(context, height, width, entity);
+    } else {
+      this._drawBrotherLabel(context, width, height, entity);
+    }
+    context.restore();
+    return model === "ql820nwb"
+      ? this._packMonochrome(context.getImageData(0, 0, width, height))
+      : canvas.toDataURL("image/jpeg", 0.96).split(",")[1];
+  }
+
+  async _printBrotherLabels(rows) {
+    if (this._printingLabels || this._buildingLabels) return;
+    const model = this._brotherPrinter;
+    const devices = this._labelDevices(rows);
+    if (!devices.length) {
+      this._printStatus = "None of the displayed devices has an available IP address.";
+      this._render();
+      return;
+    }
+    if (!this._brotherPrinters[model]) {
+      this._printStatus = "Configure this printer's IP address in Entity Audit integration settings first.";
+      this._render();
+      return;
+    }
+    let completed = 0;
+    let accepted = 0;
+    let failure = "";
+    this._printingLabels = true;
+    this._stopPrintRun = false;
+    try {
+      const format = this._brotherLabelFormat();
+      // One explicit click starts a run. Each label gets its own unique ID.
+      // There is deliberately no reconnect/resend or automatic print retry.
+      const runId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (value) => value.toString(16).padStart(2, "0")).join("");
+      if (this._labelVariant !== "text") await this._loadQrLibrary();
+      for (let index = 0; index < devices.length; index += 1) {
+        if (this._stopPrintRun) break;
+        this._printStatus = `Sending label ${index + 1} of ${devices.length}…`;
+        this._render();
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        if (this._stopPrintRun) break;
+        const result = await this._hass.callWS({
+          type: "entity_audit/print_label", request_id: `${runId}:${index}`,
+          model, roll: format.id, length_mm: format.length,
+          image: this._brotherDirectImage(devices[index], format, model),
+        });
+        if (result.state === "completed") completed += 1;
+        else if (result.state === "accepted") accepted += 1;
+        else {
+          failure = result.message || "The print outcome is unknown. Check the printer before starting another run.";
+          break;
+        }
+      }
+    } catch (error) {
+      failure = `${error?.message || "The print connection was interrupted."} Check the printer before starting another run.`;
+    } finally {
+      this._printingLabels = false;
+      this._printStatus = `${completed} labels reported complete; ${accepted} labels accepted by printer.${this._stopPrintRun ? " Run stopped." : ""}${failure ? ` ${failure}` : ""}`;
+      this._render();
+    }
+  }
+
+  async _downloadBrotherLabelsPdf(rows) {
+    if (this._buildingLabels) return;
+    const devices = this._labelDevices(rows);
+    if (!devices.length) {
+      alert("None of the displayed devices has an available IP address.");
+      return;
+    }
+    let format;
+    try {
+      format = this._brotherLabelFormat();
+    } catch (error) {
+      alert(error.message);
+      return;
+    }
+    this._buildingLabels = true;
+    this._render();
+    try {
+      if (this._labelVariant !== "text") await this._loadQrLibrary();
+      const blob = this._buildBrotherLabelsPdf(devices, format);
+      this._revokeLabelPdf();
+      this._labelPdf = {
+        blob,
+        filename: `entity-audit-brother-${this._brotherPrinter}-${format.id}-${format.width}x${format.length}mm-${new Date().toISOString().slice(0, 10)}.pdf`,
+        url: URL.createObjectURL(blob),
+        readyMessage: `Brother label PDF ready: ${format.width} × ${format.length} mm, ${devices.length} devices.`,
+        shareTitle: "Brother device labels",
+      };
+      this._recordActivity("labels_pdf_created", "info", `brother_${format.id}:${devices.length}`);
+    } catch (error) {
+      alert("The Brother label PDF could not be created. Try again after reloading the panel.");
+      this._recordActivity("labels_pdf_failed", "error", error?.name || "brother_build_failed");
+    } finally {
+      this._buildingLabels = false;
+      this._render();
+    }
+  }
+
   _assemblePdf(pageImages, imageWidth, imageHeight, pageWidthPoints = 595.28, pageHeightPoints = 841.89) {
     const encoder = new TextEncoder();
     const chunks = [];
@@ -2616,6 +2899,11 @@ class EntityAuditPanel extends HTMLElement {
         input[type="checkbox"] { width:20px; height:20px; accent-color:var(--primary-color); }
         .pdf-ready { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; border:1px solid var(--primary-color); font-size:15px; font-weight:600; }
         .pdf-ready a { display:inline-flex; align-items:center; min-height:42px; padding:8px 12px; border-radius:9px; color:var(--text-primary-color, white); background:var(--primary-color); text-decoration:none; }
+        .brother-print { display:flex; flex-wrap:wrap; align-items:end; gap:12px; min-width:0; margin:12px 0; padding:12px; border:1px solid var(--divider-color); border-radius:9px; }
+        .brother-print legend { padding:0 6px; font-weight:600; }
+        .brother-print label { display:grid; gap:6px; flex:1 1 190px; min-width:0; font-size:14px; }
+        .brother-print input { width:100%; min-height:44px; padding:10px 13px; border:1px solid var(--divider-color); border-radius:9px; color:var(--primary-text-color); background:var(--card-background-color); }
+        .brother-print p { flex-basis:100%; margin:0; font-size:13px; line-height:1.45; color:var(--secondary-text-color); }
         .pdf-ready button { color:var(--primary-color); border-color:var(--primary-color); background:transparent; }
         .table-wrap { overflow:auto; background:var(--card-background-color); border-radius:12px; box-shadow:var(--ha-card-box-shadow); }
         table { width:100%; border-collapse:collapse; }
@@ -2728,6 +3016,17 @@ class EntityAuditPanel extends HTMLElement {
             <button id="download-labels" ${this._buildingLabels ? "disabled" : ""}>${this._buildingLabels ? "Creating PDF…" : "Create labels (PDF)"}</button>
             <button id="download-tronic-labels" ${this._buildingLabels ? "disabled" : ""}>${this._buildingLabels ? "Creating PDF…" : "Create TRONIC 30 × 14 mm PDF"}</button>
           </div>
+          <fieldset class="brother-print"><legend>Brother label printing</legend>
+            <label class="select-wrap">Printer<select id="brother-printer" ${this._buildingLabels || this._printingLabels ? "disabled" : ""}><option value="ql820nwb" ${this._brotherPrinter === "ql820nwb" ? "selected" : ""}>Brother QL-820NWB</option><option value="vc500w" ${this._brotherPrinter === "vc500w" ? "selected" : ""}>Brother VC-500W</option></select></label>
+            <label class="select-wrap">${this._brotherPrinter === "vc500w" ? "CZ roll" : "DK roll"}<select id="brother-roll" ${this._buildingLabels || this._printingLabels ? "disabled" : ""}>${this._brotherRollOptions().map((roll) => `<option value="${roll.id}" ${roll.id === this._brotherRoll ? "selected" : ""}>${roll.name}</option>`).join("")}</select></label>
+            ${this._brotherRollOptions().find((roll) => roll.id === this._brotherRoll)?.length === null ? `<label>Cut length (mm)<input id="brother-length" type="number" min="30" max="300" step="1" value="${this._escape(this._brotherLength)}" ${this._buildingLabels || this._printingLabels ? "disabled" : ""}></label>` : ""}
+            <button id="download-brother-labels" ${this._buildingLabels || this._printingLabels ? "disabled" : ""}>${this._buildingLabels ? "Creating PDF…" : "Create Brother label PDF"}</button>
+            <button id="print-brother-labels" ${this._buildingLabels || this._printingLabels || !this._brotherPrinters[this._brotherPrinter] || !this._labelDevices(rows).length ? "disabled" : ""}>Print ${this._labelDevices(rows).length} devices</button>
+            ${this._printingLabels ? `<button id="stop-brother-print">Stop after current label</button>` : ""}
+            <p role="status" aria-live="polite">${this._escape(this._printStatus)}</p>
+            ${!this._brotherPrinters[this._brotherPrinter] ? "<p>To enable direct printing, configure this printer's IP address or hostname in Settings → Devices &amp; services → Entity Audit → Configure.</p>" : ""}
+            <p>One page per device. Uses the label variant selected in integration settings. Match the roll in the print dialog and print at actual size (100%). Open or share the PDF to print with AirPrint or a Brother driver. Rolls narrower than 25 mm require the text-only variant.</p>
+          </fieldset>
           <p class="privacy-note">TRONIC 30 × 14 mm creates one compact PDF page per device for the 14 × 30 mm label roll. It contains the device name, IP address, MAC address, and area. Use Open or save PDF / Share PDF to send it to the printer app; direct Bluetooth printing from this browser panel is not supported.</p>
           <div class="filters">
           <select id="device-filter" class="device-filter" aria-label="${"Filter by device"}">
@@ -2821,6 +3120,21 @@ class EntityAuditPanel extends HTMLElement {
     this.shadowRoot.querySelector("#export")?.addEventListener("click", () => this._exportCsv(rows));
     this.shadowRoot.querySelector("#download-labels")?.addEventListener("click", () => this._downloadLabelsPdf(rows));
     this.shadowRoot.querySelector("#download-tronic-labels")?.addEventListener("click", () => this._downloadTronicLabelsPdf(rows));
+    this.shadowRoot.querySelector("#brother-roll")?.addEventListener("change", (event) => {
+      this._brotherRoll = event.target.value;
+      this._render();
+    });
+    this.shadowRoot.querySelector("#brother-printer")?.addEventListener("change", (event) => {
+      this._brotherPrinter = event.target.value;
+      this._brotherRoll = this._brotherRollOptions()[0].id;
+      this._render();
+    });
+    this.shadowRoot.querySelector("#brother-length")?.addEventListener("input", (event) => {
+      this._brotherLength = event.target.value;
+    });
+    this.shadowRoot.querySelector("#download-brother-labels")?.addEventListener("click", () => this._downloadBrotherLabelsPdf(rows));
+    this.shadowRoot.querySelector("#print-brother-labels")?.addEventListener("click", () => this._printBrotherLabels(rows));
+    this.shadowRoot.querySelector("#stop-brother-print")?.addEventListener("click", () => { this._stopPrintRun = true; });
     this.shadowRoot.querySelector("#share-label-pdf")?.addEventListener("click", () => this._shareLabelPdf());
     this.shadowRoot.querySelector("#discard-label-pdf")?.addEventListener("click", () => { this._revokeLabelPdf(); this._render(); });
     this.shadowRoot.querySelectorAll(".toggle").forEach((input) => input.addEventListener("change", () => this._toggle(rows[Number(input.dataset.index)], input.checked)));
@@ -2832,6 +3146,6 @@ class EntityAuditPanel extends HTMLElement {
   }
 }
 
-if (!customElements.get("entity-audit-panel-v0325")) {
-  customElements.define("entity-audit-panel-v0325", EntityAuditPanel);
+if (!customElements.get("entity-audit-panel-v0330")) {
+  customElements.define("entity-audit-panel-v0330", EntityAuditPanel);
 }

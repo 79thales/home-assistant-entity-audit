@@ -30,6 +30,9 @@ Entity Audit is a HACS-compatible custom integration that gives administrators o
 - creates a downloadable A4 PDF label sheet for the currently filtered devices with an IP address, deduplicated by IP address, including manufacturer, area, IP, and MAC address; configure the label dimensions and variant in the integration settings, then open, save, print, or share the generated PDF;
 - provides a TRONIC/Lidl 30 × 14 mm label PDF preset, with one compact page per device for the matching 14 × 30 mm roll; it honours the selected text, text-with-QR, or QR-only variant, uses two title lines and adaptive text sizing for long names, and can be opened, saved, or shared to the printer app;
 - offers text-only, text-with-QR, and QR-only label variants; QR payloads contain the complete label data and are generated locally in the browser;
+- offers Brother QL-820NWB PDF profiles for DK-11209 (62 × 29 mm), DK-11201 (29 × 90 mm), DK-11202 (62 × 100 mm), and continuous DK-22205 (62 mm) / DK-22210 (29 mm) rolls with a selectable 30–300 mm cut length; each device gets one page at the physical media size, using the configured label variant;
+- offers Brother VC-500W PDF profiles for CZ-1001 (9 mm), CZ-1002 (12 mm), CZ-1003 (19 mm), CZ-1004 (25 mm), and CZ-1005 (50 mm) continuous rolls with a selectable 30–300 mm cut length and 313 dpi artwork; narrow rolls use a two-column text layout and require text-only mode below 25 mm;
+- prints labels directly from the panel through Home Assistant to configured Brother QL-820NWB and VC-500W network printers; the same action works from iOS without a PDF download;
 - scans Entity Audit QR labels with the device camera or an existing photo/file, displays a virtual label, and matches it to the current inventory by MAC or IP address; live-camera startup waits up to an editable 5-second default before offering the photo/file fallback;
 - opens the matched Home Assistant device page directly or filters the inventory to that device;
 - opens the native Home Assistant entity detail by clicking its current state;
@@ -130,6 +133,20 @@ QR labels are generated entirely in the browser with the bundled MIT-licensed `q
 Live camera access uses the browser media API. For dependable scanning on iPhone, access Home Assistant over HTTPS and allow Camera access for the Home Assistant Companion app in iOS Settings. The scanner always retains its photo capture and image-selection fallback.
 
 Disabling auditing stops future recording without deleting existing history. Stored records remain subject to the configured age and per-entity limits and can also be deleted manually from the panel.
+
+## Direct Brother network printing
+
+Set the **QL-820NWB IP address or hostname** and/or **VC-500W IP address or hostname** in **Settings → Devices & services → Entity Audit → Configure**. Leave an unused printer blank. The printer must be reachable from the Home Assistant server on TCP port 9100; enter a hostname or IP address, without a URL, port or credentials. Configuration changes do not send a test label.
+
+In the panel, open **Filters**, select the Brother model and the loaded DK/CZ roll, then click **Print N devices**. This sends one label per unique displayed device IP address. A batch runs sequentially; **Stop after current label** prevents the remaining labels from being submitted. The browser must remain open for the rest of the batch. On iOS the action uses the authenticated Home Assistant connection; the phone does not need a direct connection to the printer. The PDF/AirPrint workflow remains available separately.
+
+The QL driver generates monochrome native raster rows over the documented printable area at 300 dpi and checks the printer's reported model, media type, width and fixed length before sending print data. The VC driver validates the model, loaded tape width and idle state, then sends JPEG through its native XML protocol in vivid mode at 313 cross-web / 317 feed dpi with a full cut. VC label artwork is currently black text and QR on white. Roles narrower than 25 mm require text-only mode.
+
+QL status can report label completion. VC data acceptance is displayed as **accepted**, not as proof of a completed physical print or cut. Transport failures after submission are shown as an uncertain outcome. The batch stops on any error or uncertain result, and print data is never retried automatically. Each label request has an ID retained for one hour in memory to reject accidental replay; this ledger does not survive an integration reload or HA restart. Check the printer before explicitly starting another run after an interruption.
+
+Only administrators can submit images, and the server chooses the network address from integration settings. The image geometry and size are validated before any printer connection. Raster conversion runs outside the HA event loop; network operations have bounded asynchronous timeouts. Activity history records only the printer model and outcome, not the label image or configured address. Labels are not persisted by the printing service.
+
+The QL protocol is described in [Brother's raster command reference](https://download.brother.com/welcome/docp100278/cv_ql800_eng_raster_101.pdf). VC XML/JPEG framing is based on the primary protocol documentation and source of [node-vc-500w](https://github.com/honeymaro/node-vc-500w), an independent project. Automated tests use simulated printers; an initial real-device test is still required to verify firmware-specific feed and cutting behaviour.
 
 ## Existing alternatives
 

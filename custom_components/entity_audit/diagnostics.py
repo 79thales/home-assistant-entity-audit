@@ -12,6 +12,8 @@ from .const import DOMAIN
 
 
 TO_REDACT = {
+    "brother_ql_host",
+    "brother_vc_host",
     "access_token",
     "api_key",
     "authorization",

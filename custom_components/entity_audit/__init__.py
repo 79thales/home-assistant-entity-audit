@@ -11,6 +11,8 @@ from homeassistant.core import HomeAssistant
 
 from .const import (
     CONF_ACTIVITY_LOG_ENABLED,
+    CONF_BROTHER_QL_HOST,
+    CONF_BROTHER_VC_HOST,
     CONF_CAMERA_WAIT_SECONDS,
     CONF_LABEL_HEIGHT,
     CONF_LABEL_VARIANT,
@@ -31,6 +33,7 @@ from .const import (
     QR_READER_LIBRARY_URL,
 )
 from .manager import EntityAuditManager
+from .printing import PrintService
 from .websocket import async_register_websocket_commands
 
 
@@ -55,6 +58,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await manager.async_start()
     runtime = hass.data.setdefault(DOMAIN, {})
     runtime["manager"] = manager
+    runtime["printing"] = PrintService({
+        "ql820nwb": values.get(CONF_BROTHER_QL_HOST, ""),
+        "vc500w": values.get(CONF_BROTHER_VC_HOST, ""),
+    })
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     if not runtime.get("api_registered"):
@@ -98,6 +105,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload Entity Audit."""
     runtime = hass.data[DOMAIN]
     manager: EntityAuditManager = runtime.pop("manager")
+    runtime.pop("printing", None)
     await manager.async_stop()
     async_remove_panel(hass, DOMAIN)
     return True

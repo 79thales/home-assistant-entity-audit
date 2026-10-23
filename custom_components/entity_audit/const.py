@@ -1,7 +1,7 @@
 """Constants for Entity Audit."""
 
 DOMAIN = "entity_audit"
-INTEGRATION_VERSION = "0.3.29"
+INTEGRATION_VERSION = "0.3.30"
 BACKUP_EXPORT_FORMAT_VERSION = 1
 STORAGE_KEY = f"{DOMAIN}.storage"
 STORAGE_VERSION = 1
@@ -13,6 +13,8 @@ CONF_CAMERA_WAIT_SECONDS = "camera_wait_seconds"
 CONF_LABEL_WIDTH = "label_width_mm"
 CONF_LABEL_HEIGHT = "label_height_mm"
 CONF_LABEL_VARIANT = "label_variant"
+CONF_BROTHER_QL_HOST = "brother_ql_host"
+CONF_BROTHER_VC_HOST = "brother_vc_host"
 CONF_CLEAR_ACTIVITY_HISTORY = "clear_activity_history"
 DEFAULT_RETENTION_DAYS = 30
 DEFAULT_MAX_EVENTS = 500
@@ -48,6 +50,9 @@ ACTIVITY_EVENT_TYPES = frozenset(
         "labels_pdf_failed",
         "labels_pdf_shared",
         "labels_pdf_share_failed",
+        "labels_network_completed",
+        "labels_network_accepted",
+        "labels_network_failed",
         "qr_scanner_opened",
         "qr_camera_environment",
         "qr_camera_requested",
@@ -68,5 +73,5 @@ PROBLEM_STATES = {"unavailable", "unknown"}
 PANEL_URL = "/entity_audit/entity-audit-panel.js"
 QR_LIBRARY_URL = "/entity_audit/qrcode.js"
 QR_READER_LIBRARY_URL = "/entity_audit/jsQR.js"
-PANEL_MODULE_URL = f"{PANEL_URL}?v=0.3.29"
-PANEL_ELEMENT = "entity-audit-panel-v0325"
+PANEL_MODULE_URL = f"{PANEL_URL}?v=0.3.30"
+PANEL_ELEMENT = "entity-audit-panel-v0330"

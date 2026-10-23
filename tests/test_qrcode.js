@@ -546,9 +546,137 @@ function testCameraWaitTimeout() {
   }
 }
 
+async function testBrotherLabelMedia() {
+  // Validate physical PDF page sizes separately from landscape artwork.
+  // Portrait rolls must rotate content, and text-with-QR must retain every
+  // visible device field. No real printer is contacted by these checks.
+  const originalDocument = global.document;
+  const brotherPanel = new global.EntityAuditPanel();
+  const drawn = [];
+  const rotations = [];
+  const qrPayloads = [];
+  brotherPanel._drawQr = (_context, data) => qrPayloads.push(JSON.parse(data));
+  const context = {
+    font: "26px Arial",
+    save() {}, restore() {}, fillRect() {}, translate() {},
+    rotate(angle) { rotations.push(angle); },
+    fillText(value) { drawn.push(value); },
+    measureText(value) { return { width: Array.from(String(value)).length * Number(this.font.match(/(\d+)px/)?.[1] || 12) * 0.5 }; },
+  };
+  global.document = {
+    createElement() {
+      return { getContext: () => context, toDataURL: () => "data:image/jpeg;base64,/9j/2Q==" };
+    },
+  };
+  const device = {
+    device_name: "Test device", ip_address: "192.0.2.4", mac_address: "00:11:22:33:44:55",
+    manufacturer: "Example", area_name: "Office",
+  };
+  try {
+    const expectedMedia = {
+      dk_22205: [62, 40], dk_22210: [29, 40], dk_11209: [62, 29],
+      dk_11201: [29, 90], dk_11202: [62, 100],
+    };
+    for (const [id, [width, length]] of Object.entries(expectedMedia)) {
+      brotherPanel._brotherRoll = id;
+      const format = brotherPanel._brotherLabelFormat();
+      if (format.width !== width || format.length !== length) throw new Error(`Incorrect media: ${id}`);
+      const pdf = await brotherPanel._buildBrotherLabelsPdf([device, device], format).text();
+      const mediaBoxes = [...pdf.matchAll(/\/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/g)];
+      if (mediaBoxes.length !== 2 || mediaBoxes.some((match) =>
+        Math.abs(Number(match[1]) * 25.4 / 72 - width) > 0.001 ||
+        Math.abs(Number(match[2]) * 25.4 / 72 - length) > 0.001)) {
+        throw new Error(`PDF page does not match the physical roll size: ${id}`);
+      }
+    }
+    if (!rotations.includes(-Math.PI / 2)) throw new Error("Portrait label artwork was not rotated");
+    brotherPanel._brotherPrinter = "vc500w";
+    for (const [id, width] of Object.entries({ cz_1001: 9, cz_1002: 12, cz_1003: 19, cz_1004: 25, cz_1005: 50 })) {
+      brotherPanel._brotherRoll = id;
+      const format = brotherPanel._brotherLabelFormat();
+      if (format.width !== width || format.dpi !== 313) throw new Error(`Incorrect VC-500W media or resolution: ${id}`);
+      const pdf = await brotherPanel._buildBrotherLabelsPdf([device], format).text();
+      const box = pdf.match(/\/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/);
+      if (!box || Math.abs(Number(box[1]) * 25.4 / 72 - width) > 0.001) {
+        throw new Error(`VC-500W PDF width does not match CZ tape: ${id}`);
+      }
+    }
+    brotherPanel._brotherRoll = "cz_1001";
+    brotherPanel._labelVariant = "text_qr";
+    let narrowQrRejected = false;
+    try { brotherPanel._brotherLabelFormat(); } catch (_error) { narrowQrRejected = true; }
+    if (!narrowQrRejected) throw new Error("Narrow tape accepted an unreadable full-payload QR layout");
+    brotherPanel._brotherPrinter = "ql820nwb";
+    brotherPanel._labelVariant = "text_qr";
+    brotherPanel._drawBrotherLabel(context, 732, 472, device);
+    for (const expected of ["IP: 192.0.2.4", "MAC: 00:11:22:33:44:55", "Manufacturer: Example", "Area: Office"]) {
+      if (!drawn.includes(expected)) throw new Error(`Missing printed label field: ${expected}`);
+    }
+    if (qrPayloads.length !== 1 || qrPayloads[0].mac_address !== device.mac_address) {
+      throw new Error("Brother text-with-QR did not preserve the QR payload");
+    }
+    drawn.length = 0;
+    brotherPanel._labelVariant = "qr";
+    brotherPanel._drawBrotherLabel(context, 732, 472, device);
+    if (drawn.length || qrPayloads.length !== 2) throw new Error("Brother QR-only variant was not respected");
+    brotherPanel._brotherRoll = "dk_22205";
+    brotherPanel._brotherLength = 75;
+    if (brotherPanel._brotherLabelFormat().length !== 75) throw new Error("Custom cut length was ignored");
+    for (const invalid of ["", "invalid", 29, 301, 40.5]) {
+      brotherPanel._brotherLength = invalid;
+      let rejected = false;
+      try { brotherPanel._brotherLabelFormat(); } catch (_error) { rejected = true; }
+      if (!rejected) throw new Error(`Invalid continuous label length was accepted: ${invalid}`);
+    }
+  } finally {
+    global.document = originalDocument;
+  }
+}
+
+async function testDirectBrotherPrint() {
+  // Exercise a real packed image byte boundary and verify a lost/unknown
+  // result stops the batch. The test does not contact a real Home Assistant.
+  const printPanel = new global.EntityAuditPanel();
+  const image = { width: 9, height: 2, data: new Uint8ClampedArray(9 * 2 * 4).fill(255) };
+  for (const pixel of [0, 8, 10]) {
+    image.data[pixel * 4] = 0;
+    image.data[pixel * 4 + 1] = 0;
+    image.data[pixel * 4 + 2] = 0;
+  }
+  const packed = Buffer.from(printPanel._packMonochrome(image), "base64");
+  if (!packed.equals(Buffer.from([128, 128, 64, 0]))) {
+    throw new Error("Direct QL raster packing changed bit order or crossed row boundaries");
+  }
+  const originalAnimationFrame = global.requestAnimationFrame;
+  global.requestAnimationFrame = (callback) => callback();
+  const calls = [];
+  printPanel._render = () => {};
+  printPanel._brotherPrinters = { ql820nwb: true };
+  printPanel._brotherDirectImage = () => "packed-label";
+  printPanel._hass = { callWS: async (message) => {
+    calls.push(message);
+    return { state: "unknown", submitted: true, message: "Check the printer." };
+  } };
+  try {
+    await printPanel._printBrotherLabels([
+      { device_id: "one", name: "Device one", ip_address: "192.0.2.1" },
+      { device_id: "one", name: "Device one sensor", ip_address: "192.0.2.1" },
+      { device_id: "two", name: "Device two", ip_address: "192.0.2.2" },
+    ]);
+    if (calls.length !== 1 || calls[0].type !== "entity_audit/print_label" || printPanel._printingLabels) {
+      throw new Error("An uncertain print result was retried or the batch continued");
+    }
+    if (!/^[a-f0-9]{32}:0$/.test(calls[0].request_id) || !printPanel._printStatus.includes("Check the printer")) {
+      throw new Error("Print request identity or failure feedback is missing");
+    }
+  } finally {
+    global.requestAnimationFrame = originalAnimationFrame;
+  }
+}
+
 testCameraWaitTimeout();
 testEditorNavigation();
-testZipPackage().then(testInvalidConfigurationResponseFailsCollection).then(testConfigurationBackupContainsValidatedSnapshot).then(testCameraRequestUsesTheOriginalTap).catch((error) => {
+testZipPackage().then(testInvalidConfigurationResponseFailsCollection).then(testConfigurationBackupContainsValidatedSnapshot).then(testCameraRequestUsesTheOriginalTap).then(testBrotherLabelMedia).then(testDirectBrotherPrint).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

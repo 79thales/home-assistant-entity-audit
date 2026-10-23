@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from .backup import validate_configuration_snapshot
 from .const import ACTIVITY_EVENT_TYPES, DOMAIN
 from .manager import EntityAuditManager
+from .printing import PrintError, PrintService, prepare_label
 
 
 def async_register_websocket_commands(hass: HomeAssistant) -> None:
@@ -25,6 +26,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_validate_configuration_export)
     websocket_api.async_register_command(hass, ws_get_settings)
     websocket_api.async_register_command(hass, ws_log_activity)
+    websocket_api.async_register_command(hass, ws_print_label)
 
 
 def _manager(hass: HomeAssistant) -> EntityAuditManager:
@@ -153,7 +155,43 @@ async def ws_validate_configuration_export(hass, connection, msg) -> None:
 @websocket_api.async_response
 async def ws_get_settings(hass, connection, msg) -> None:
     """Return administrator-configured panel settings."""
-    connection.send_result(msg["id"], _manager(hass).get_settings())
+    settings = _manager(hass).get_settings()
+    settings["brother_printers"] = hass.data[DOMAIN]["printing"].configured()
+    connection.send_result(msg["id"], settings)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): f"{DOMAIN}/print_label",
+    vol.Required("request_id"): vol.All(str, vol.Length(min=16, max=96), vol.Match(r"^[A-Za-z0-9:_-]+$")),
+    vol.Required("model"): vol.In(["ql820nwb", "vc500w"]),
+    vol.Required("roll"): vol.All(str, vol.Length(max=24)),
+    vol.Required("length_mm"): vol.All(int, vol.Range(min=29, max=300)),
+    vol.Required("image"): vol.All(str, vol.Length(min=1, max=2_700_000)),
+})
+@websocket_api.async_response
+async def ws_print_label(hass: HomeAssistant, connection, msg) -> None:
+    """Print one image to a configured printer, never to an arbitrary endpoint.
+
+    Bitmap validation and QL encoding run in the HA executor; network reads and
+    writes are asynchronous. Responses distinguish acceptance from completion
+    and from an uncertain outcome. Activity records contain no label contents.
+    """
+    service: PrintService = hass.data[DOMAIN]["printing"]
+    try:
+        label = await hass.async_add_executor_job(
+            prepare_label, msg["model"], msg["roll"], msg["length_mm"], msg["image"]
+        )
+        result = await service.submit(msg["request_id"], label)
+    except PrintError as error:
+        _manager(hass).log_activity("labels_network_failed", "error", msg["model"])
+        connection.send_error(msg["id"], "print_failed", str(error))
+        return
+    event = {
+        "completed": "labels_network_completed", "accepted": "labels_network_accepted",
+    }.get(result["state"], "labels_network_failed")
+    _manager(hass).log_activity(event, "info" if result["state"] in ("accepted", "completed") else "error", msg["model"])
+    connection.send_result(msg["id"], result)
 
 
 @websocket_api.require_admin
