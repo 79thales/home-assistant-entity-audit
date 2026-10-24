@@ -24,7 +24,7 @@ def _git(repository: Path, *args: str) -> bytes:
 
 
 def extract_release_notes(changelog: str, version: str) -> str:
-    """Extract only the requested version, preserving Czech and English notes."""
+    """Extract the requested release; require English and preserve older notes."""
     changelog = changelog.replace("\r\n", "\n")
     match = re.search(
         rf"^## {re.escape(version)}(?:\s[^\n]*)?\n(.*?)(?=^## |\Z)",
@@ -34,11 +34,8 @@ def extract_release_notes(changelog: str, version: str) -> str:
     if match is None:
         raise ValueError(f"CHANGELOG.md has no release notes for {version}")
     notes = match.group(1).strip() + "\n"
-    if not all(
-        re.search(rf"^### {language}$", notes, flags=re.MULTILINE)
-        for language in ("Čeština", "English")
-    ):
-        raise ValueError("Release notes must contain Czech and English sections")
+    if not re.search(r"^### English$", notes, flags=re.MULTILINE):
+        raise ValueError("Release notes must contain an English section")
     return notes
 
 

@@ -168,11 +168,16 @@ class ReleaseNotesTest(unittest.TestCase):
 
     def test_missing_release_or_language_is_rejected(self) -> None:
         for changelog in (
-            "## 0.1.0\n\n### English\n\nEnglish only\n",
+            "## 0.1.0\n\n### Čeština\n\nTest\n",
             "## 0.1.1\n\n### Čeština\n\nTest\n\n### English\n\nTest\n",
         ):
             with self.subTest(changelog=changelog), self.assertRaises(ValueError):
                 extract_release_notes(changelog, "0.1.0")
+
+    def test_new_releases_accept_english_only_notes(self) -> None:
+        changelog = "## 0.1.0\n\n### English\n\nEnglish release notes.\n"
+        self.assertEqual(extract_release_notes(changelog, "0.1.0"),
+                         "### English\n\nEnglish release notes.\n")
 
 
 class HacsInstallerMetadataTest(unittest.TestCase):

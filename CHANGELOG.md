@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.30 – 2026-10-24
+
+### English
+
+- Adds Brother QL-820NWB DK and VC-500W CZ label profiles, with exact-size PDF pages and selectable cut lengths for continuous rolls.
+- Adds direct network label printing from the Home Assistant panel, including iOS. Configure each printer's IP address or hostname in the integration options, then select its loaded roll before printing.
+- Checks printer identity and loaded media before submitting data. Processes batches sequentially, supports stopping after the current label, and avoids automatic retries after interrupted or uncertain submissions.
+- Distinguishes printer-reported completion from data acceptance. VC-500W acceptance does not claim that a physical print or cut has completed.
+- Adds bounded timeouts, in-memory request deduplication, administrator-only print commands, and redaction of printer addresses from diagnostics. Label images are not persisted by the printing service.
+- Adds regression tests using simulated printer peers. Physical output, feeding and cutting still require an initial test on the actual printers.
+- Updates HACS installation documentation following the merge of submission #10585 and allows English-only release notes while preserving historical releases.
+
 ## 0.3.29 – 2026-10-12
 
 ### Čeština

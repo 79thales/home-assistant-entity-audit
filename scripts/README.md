@@ -23,12 +23,12 @@ tags or overwrite their assets. Release CI checks the shared README header in
 the tagged checkout.
 
 1. Update `manifest.json` and add a matching version section to `CHANGELOG.md`,
-   preserving both `### Čeština` and `### English`. Commit the changes and pass
+   including `### English` release notes. Commit the changes and pass
    the **Validate** workflow, including HACS and Hassfest.
 2. Push the corresponding `vX.Y.Z` tag. **Prepare release installer** checks out
    that exact tag, runs tests, verifies the manifest version and builds the ZIP.
 3. The workflow attaches the ZIP to a **draft** release and copies the matching
-   bilingual changelog section into its notes. It does not publish the release.
+   changelog section into its notes. It does not publish the release.
 4. Review the draft's notes and ensure `entity_audit.zip` is attached and the
    workflow succeeded. Only then publish the draft. Do not publish an empty
    release first: HACS expects the configured ZIP to be available immediately.

@@ -58,7 +58,7 @@ Device grouping uses the direct device assigned to an entity in the entity regis
 
 ## Installation through HACS
 
-Until the repository is accepted into the HACS default catalog, add `https://github.com/79thales/home-assistant-entity-audit` under **HACS → Integrations → Custom repositories**, choose the **Integration** category, and install it.
+Find **Entity Audit** in HACS and install it. If the catalog has not refreshed yet, add `https://github.com/79thales/home-assistant-entity-audit` under **HACS → Integrations → Custom repositories**, choose the **Integration** category, and install it.
 
 ### Installer downloads
 
@@ -159,7 +159,7 @@ Those projects overlap with parts of Entity Audit, but have a different focus an
 
 ## Publishing status
 
-The repository includes local brand assets and automated HACS and Hassfest validation. Entity Audit has been submitted to the HACS default catalog in [hacs/default#10585](https://github.com/hacs/default/pull/10585). Until that pull request is accepted, install the integration as a HACS custom repository as described above.
+The repository includes local brand assets and automated HACS and Hassfest validation. The HACS default catalog submission [hacs/default#10585](https://github.com/hacs/default/pull/10585) has been merged.
 
 ## Development checks
 
