@@ -9,6 +9,10 @@ import json
 if __name__ == "__main__":
     # Absence of HA is an error in this dedicated CI job, never a skipped test.
     print(f"Home Assistant {version('homeassistant')}")
+    # Run HA's package bootstrap first, just as the real application does.
+    # Recent releases install the voluptuous compatibility alias here; the
+    # integration must not install a process-wide alias itself.
+    import_module("homeassistant")
     for module in (
         "custom_components.entity_audit",
         "custom_components.entity_audit.backup",
@@ -26,12 +30,17 @@ if __name__ == "__main__":
     # exact converter/custom serializer that HA uses for setup and options;
     # arbitrary callables in data_schema otherwise fail only when opened.
     from homeassistant.helpers import config_validation as cv
-    import voluptuous_serialize
+    ha_flow = import_module("homeassistant.helpers.data_entry_flow")
+    if hasattr(ha_flow, "probatio"):
+        convert = ha_flow.probatio.to_field_list
+    else:
+        # Older supported HA versions use the original form serializer.
+        convert = import_module("voluptuous_serialize").convert
 
     flow = import_module("custom_components.entity_audit.config_flow")
     for include_clear_history in (False, True):
         schema = flow.EntityAuditConfigFlow._schema({}, include_clear_history)
-        converted = voluptuous_serialize.convert(schema, custom_serializer=cv.custom_serializer)
+        converted = convert(schema, custom_serializer=cv.custom_serializer)
         json.dumps(converted)
         fields = {field["name"]: field for field in converted}
         for name in ("brother_ql_host", "brother_vc_host"):

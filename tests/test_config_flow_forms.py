@@ -18,6 +18,7 @@ from types import SimpleNamespace
 
 import voluptuous as vol
 import voluptuous_serialize
+import probatio
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENT = ROOT / "custom_components" / "entity_audit"
@@ -77,6 +78,23 @@ NAMESPACE["EntityAuditConfigFlow"] = FlowHarness
 
 
 class ConfigFlowFormsTest(unittest.IsolatedAsyncioTestCase):
+    def test_current_ha_serializer_accepts_setup_and_options(self):
+        # Build the same source against HA's current validation engine without
+        # replacing voluptuous globally: both generations stay independently
+        # exercised in this process. No integration runtime dependency is added.
+        namespace = {**NAMESPACE, "vol": probatio}
+        exec(compile(ast.Module(body=FUNCTIONS, type_ignores=[]), "config_flow.py", "exec"), namespace)
+        for options in (False, True):
+            with self.subTest(options=options):
+                schema = namespace["_schema"]({}, include_clear_history=options)
+                serialized = probatio.to_field_list(schema)
+                json.dumps(serialized)
+                fields = {field["name"]: field for field in serialized}
+                for key in ("brother_ql_host", "brother_vc_host"):
+                    self.assertEqual(fields[key]["type"], "string")
+                    self.assertFalse(fields[key]["required"])
+                self.assertEqual(schema({})["brother_ql_host"], "")
+
     def test_setup_and_options_schemas_are_json_serializable(self):
         for options in (False, True):
             with self.subTest(options=options):
