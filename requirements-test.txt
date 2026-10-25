@@ -1,0 +1,4 @@
+# Test-only dependencies. Integration runtime dependencies are supplied by HA.
+PyYAML==6.0.3
+voluptuous==0.15.2
+voluptuous-serialize==2.7.0

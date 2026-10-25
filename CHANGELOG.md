@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.31 – 2026-10-25
+
+### English
+
+- Fixes setup and options forms introduced in v0.3.30. A custom printer-address validator could not be serialized by Home Assistant, preventing the form from opening and leaving a setup flow in progress.
+- Validates printer addresses after submission and shows field-specific errors while preserving entered values. Optional unused printer addresses can remain empty.
+- Prevents invalid submissions from clearing activity history or saving options.
+- Adds regression coverage for real form-schema serialization, initial setup, options, invalid addresses, and empty addresses. The real Home Assistant compatibility check now also serializes both forms.
+
 ## 0.3.30 – 2026-10-24
 
 ### English

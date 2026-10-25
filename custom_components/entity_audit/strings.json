@@ -17,11 +17,17 @@
         }
       }
     },
+    "error": {
+      "invalid_printer_host": "Enter an IP address or hostname without a URL, port, or credentials. Leave the field empty if this printer is not used."
+    },
     "abort": {
       "already_configured": "Entity Audit is already configured."
     }
   },
   "options": {
+    "error": {
+      "invalid_printer_host": "Enter an IP address or hostname without a URL, port, or credentials. Leave the field empty if this printer is not used."
+    },
     "step": {
       "init": {
         "title": "Entity Audit settings",

@@ -10,6 +10,7 @@ remain part of validation.
 Local verification, without uploading or publishing:
 
 ```shell
+python -m pip install -r requirements-test.txt
 python -m unittest discover -s tests -v
 python scripts/build_release.py --ref HEAD
 ```

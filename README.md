@@ -164,6 +164,8 @@ The repository includes local brand assets and automated HACS and Hassfest valid
 ## Development checks
 
 ```bash
+python -m pip install -r requirements-test.txt
+python -m unittest discover -s tests
 python -m compileall custom_components/entity_audit
 python -m json.tool custom_components/entity_audit/manifest.json
 node --check custom_components/entity_audit/frontend/entity-audit-panel.js
