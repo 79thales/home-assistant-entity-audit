@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.33 – 2026-10-27
+
+### English
+
+- Removes the TRONIC 30 × 14 mm PDF preset and its panel controls. Existing A4 and Brother label options remain available.
+- Separates audit, export and label actions from filters, making them available on mobile while filters are closed. Brother printer controls are grouped in a separate expandable section.
+- Preserves expanded action and printer sections when the panel refreshes its display. No audit records, entity settings or saved label templates are removed.
+
+### Čeština
+
+- Odstraňuje formát PDF pro štítky TRONIC 30 × 14 mm a jeho ovládání. Štítky A4 a možnosti tiskáren Brother zůstávají dostupné.
+- Odděluje audit, export a štítky od filtrů, takže jsou na mobilu dostupné i při zavřených filtrech. Volby tiskárny Brother sdružuje do samostatné rozbalovací části.
+- Při překreslení panelu zachovává rozbalenou nabídku akcí a tiskárny. Auditní záznamy, nastavení entit a uložené šablony štítků nemaže.
+
 ## 0.3.32 – 2026-10-27
 
 ### English

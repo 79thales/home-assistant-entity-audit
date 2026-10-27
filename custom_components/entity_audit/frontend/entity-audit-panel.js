@@ -48,6 +48,7 @@ class EntityAuditPanel extends HTMLElement {
     this._stopPrintRun = false;
     this._filtersOpen = false;
     this._printOptionsOpen = false;
+    this._brotherOptionsOpen = false;
     this._labelPdf = null;
     this._qrLibraryPromise = null;
     this._qrReaderLibraryPromise = null;
@@ -1903,7 +1904,8 @@ class EntityAuditPanel extends HTMLElement {
     return { lines: lines.slice(0, maxLines), complete: true };
   }
 
-  _fitTronicTitle(context, value, maxWidth, maxLines, maximumSize, minimumSize) {
+  // Přizpůsobí název šířce štítku: postupně zmenšuje písmo a zalamuje do zadaného počtu řádků; pokud se text nevejde, vrátí nejmenší velikost.
+  _fitLabelTitle(context, value, maxWidth, maxLines, maximumSize, minimumSize) {
     for (let size = maximumSize; size >= minimumSize; size -= 1) {
       context.font = `700 ${size}px Arial, sans-serif`;
       const wrapped = this._canvasTextLines(context, value, maxWidth, maxLines);
@@ -1946,7 +1948,7 @@ class EntityAuditPanel extends HTMLElement {
       : 0;
     const textWidth = width - (padding * 2) - (combinedQrSize ? combinedQrSize + padding : 0);
     context.fillStyle = "#111827";
-    const title = this._fitTronicTitle(
+    const title = this._fitLabelTitle(
       context,
       entity.device_name || entity.name,
       textWidth,
@@ -1990,65 +1992,6 @@ class EntityAuditPanel extends HTMLElement {
     context.restore();
   }
 
-  _drawTronicLabel(context, width, height, entity) {
-    // The supplied TRONIC roll is 14 x 30 mm. The active label variant is
-    // honoured, including the QR-only and text-with-QR choices from settings.
-    const padding = Math.max(8, Math.round(height * 0.075));
-    const variant = this._labelVariant;
-    const qrSize = height - (padding * 2);
-
-    context.save();
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, width, height);
-    context.fillStyle = "#000000";
-
-    if (variant === "qr") {
-      this._drawQr(context, this._labelQrPayload(entity), padding, padding, qrSize);
-      context.restore();
-      return;
-    }
-
-    const hasQr = variant === "text_qr";
-    const usableWidth = width - (padding * 2) - (hasQr ? qrSize + padding : 0);
-    const title = this._fitTronicTitle(
-      context,
-      entity.device_name || entity.name,
-      usableWidth,
-      2,
-      hasQr ? Math.max(11, Math.round(height * 0.13)) : Math.max(18, Math.round(height * 0.16)),
-      hasQr ? 6 : 8
-    );
-    let cursor = padding;
-    context.font = `700 ${title.size}px Arial, sans-serif`;
-    for (const line of title.lines) {
-      cursor += title.size;
-      context.fillText(line, padding, cursor);
-      cursor += Math.max(1, Math.round(title.size * 0.1));
-    }
-    context.font = `700 ${hasQr ? 10 : Math.max(15, Math.round(height * 0.11))}px Arial, sans-serif`;
-    cursor += hasQr ? 9 : Math.max(15, Math.round(height * 0.11));
-    context.fillText(this._truncateCanvasText(context, `IP ${entity.ip_address}`, usableWidth), padding, cursor);
-    context.font = `600 ${hasQr ? 8 : Math.max(10, Math.round(height * 0.08))}px Arial, sans-serif`;
-    cursor += hasQr ? 9 : Math.max(12, Math.round(height * 0.1));
-    context.fillText(this._truncateCanvasText(context, `MAC ${entity.mac_address || "not available"}`, usableWidth), padding, cursor);
-    const location = entity.area_name || entity.manufacturer || "";
-    if (location) {
-      context.font = `500 ${hasQr ? 8 : Math.max(10, Math.round(height * 0.075))}px Arial, sans-serif`;
-      cursor += hasQr ? 9 : Math.max(11, Math.round(height * 0.09));
-      context.fillText(this._truncateCanvasText(context, location, usableWidth), padding, cursor);
-    }
-    if (hasQr) {
-      this._drawQr(
-        context,
-        this._labelQrPayload(entity),
-        width - padding - qrSize,
-        padding,
-        qrSize
-      );
-    }
-    context.restore();
-  }
-
   _buildLabelsPdf(devices, labelWidth, labelHeight) {
     const dpi = 150;
     const pageWidth = 1240;
@@ -2085,28 +2028,6 @@ class EntityAuditPanel extends HTMLElement {
       pages.push(this._dataUrlToBytes(canvas.toDataURL("image/jpeg", 0.92)));
     }
     return this._assemblePdf(pages, pageWidth, pageHeight);
-  }
-
-  _buildTronicLabelsPdf(devices) {
-    const dpi = 300;
-    const labelWidthMm = 30;
-    const labelHeightMm = 14;
-    const pageWidth = Math.round((labelWidthMm / 25.4) * dpi);
-    const pageHeight = Math.round((labelHeightMm / 25.4) * dpi);
-    const pages = devices.map((entity) => {
-      const canvas = document.createElement("canvas");
-      canvas.width = pageWidth;
-      canvas.height = pageHeight;
-      this._drawTronicLabel(canvas.getContext("2d"), pageWidth, pageHeight, entity);
-      return this._dataUrlToBytes(canvas.toDataURL("image/jpeg", 0.96));
-    });
-    return this._assemblePdf(
-      pages,
-      pageWidth,
-      pageHeight,
-      (labelWidthMm / 25.4) * 72,
-      (labelHeightMm / 25.4) * 72
-    );
   }
 
   _brotherRollOptions() {
@@ -2161,7 +2082,7 @@ class EntityAuditPanel extends HTMLElement {
         const textWidth = width - margin * 2 - (qrSize ? qrSize + margin : 0);
         let cursor = margin;
         for (const [text, weight, max] of [[entity.name, "700", 42], [entity.entity_id, "600", 27]]) {
-          const fitted = this._fitTronicTitle(context, text, textWidth, 3, max, 11);
+          const fitted = this._fitLabelTitle(context, text, textWidth, 3, max, 11);
           context.fillStyle = "#000000";
           context.font = `${weight} ${fitted.size}px Arial, sans-serif`;
           for (const line of fitted.lines) {
@@ -2179,7 +2100,7 @@ class EntityAuditPanel extends HTMLElement {
     if (height < 240 && variant === "text") {
       // On narrow CZ tape, use the long axis and two columns for the four
       // fields. This preserves MAC, manufacturer and area within the height.
-      const title = this._fitTronicTitle(context, entity.device_name || entity.name,
+      const title = this._fitLabelTitle(context, entity.device_name || entity.name,
         width - margin * 2, 2, Math.min(34, Math.round(height * 0.18)), 12);
       context.fillStyle = "#000000";
       context.font = `700 ${title.size}px Arial, sans-serif`;
@@ -2215,7 +2136,7 @@ class EntityAuditPanel extends HTMLElement {
     // spodnímu okraji. Dlouhé hodnoty se přizpůsobí dostupné šířce.
     const qrSize = variant === "text_qr" ? Math.min(height - margin * 2, Math.floor(width * 0.44)) : 0;
     const textWidth = width - margin * 2 - (qrSize ? qrSize + margin : 0);
-    const title = this._fitTronicTitle(context, entity.device_name || entity.name, textWidth, 2, Math.max(18, Math.floor(height * 0.15)), 18);
+    const title = this._fitLabelTitle(context, entity.device_name || entity.name, textWidth, 2, Math.max(18, Math.floor(height * 0.15)), 18);
     context.fillStyle = "#000000";
     context.font = `700 ${title.size}px Arial, sans-serif`;
     let cursor = margin;
@@ -2713,35 +2634,6 @@ class EntityAuditPanel extends HTMLElement {
     }
   }
 
-  async _downloadTronicLabelsPdf(rows) {
-    const devices = this._labelDevices(rows);
-    if (!devices.length) {
-      alert("None of the displayed devices has an available IP address.");
-      return;
-    }
-    this._buildingLabels = true;
-    this._render();
-    try {
-      if (this._labelVariant !== "text") await this._loadQrLibrary();
-      const blob = this._buildTronicLabelsPdf(devices);
-      this._revokeLabelPdf();
-      this._labelPdf = {
-        blob,
-        filename: `entity-audit-tronic-30x14mm-${new Date().toISOString().slice(0, 10)}.pdf`,
-        url: URL.createObjectURL(blob),
-        readyMessage: "The TRONIC 30 × 14 mm label PDF is ready.",
-        shareTitle: "TRONIC device labels",
-      };
-      this._recordActivity("labels_pdf_created", "info", `tronic_30x14:${devices.length}`);
-    } catch (error) {
-      alert("The TRONIC label PDF could not be created.");
-      this._recordActivity("labels_pdf_failed", "error", error?.name || "tronic_build_failed");
-    } finally {
-      this._buildingLabels = false;
-      this._render();
-    }
-  }
-
   async _shareLabelPdf() {
     if (!this._labelPdf || !navigator.canShare || !navigator.share) return;
     const file = new File([this._labelPdf.blob], this._labelPdf.filename, { type: "application/pdf" });
@@ -3211,7 +3103,10 @@ class EntityAuditPanel extends HTMLElement {
         .row-print-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
         .row-print-actions button { min-height:40px; padding:6px 9px; font-size:13px; }
         .row-print-actions select { min-height:40px; max-width:100%; font-size:13px; color:var(--primary-text-color); background:var(--card-background-color); }
-        .print-options { margin:10px 0; border:1px solid var(--divider-color); border-radius:9px; padding:10px; }
+        .print-options { margin:12px 0; background:var(--card-background-color); box-shadow:var(--ha-card-box-shadow); border:1px solid var(--divider-color); border-radius:9px; padding:12px; }
+        .action-heading { margin:14px 0 8px; font-size:14px; font-weight:600; color:var(--secondary-text-color); }
+        .brother-options { margin-top:12px; }
+        .brother-options summary { cursor:pointer; font-weight:600; }
         .print-options summary { cursor:pointer; min-height:36px; font-weight:600; }
         .print-options[open] summary { margin-bottom:10px; }
         .pair-print { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:12px 0; padding:12px; border:1px solid var(--divider-color); border-radius:9px; }
@@ -3311,27 +3206,7 @@ class EntityAuditPanel extends HTMLElement {
         </section>
         ${this._labelPdf ? `<section class="pdf-ready"><span>${this._escape(this._labelPdf.readyMessage || "The label PDF is ready.")}</span><a id="download-label-pdf" href="${this._escape(this._labelPdf.url)}" download="${this._escape(this._labelPdf.filename)}">${"Open or save PDF"}</a>${navigator.canShare && navigator.share ? `<button id="share-label-pdf">${"Share PDF"}</button>` : ""}<button id="discard-label-pdf">✕</button></section>` : ""}
         <section class="filter-panel ${this._filtersOpen ? "open" : ""}">
-          <details class="print-options" ${this._printOptionsOpen ? "open" : ""}><summary>Tisk, export a hromadné akce</summary>
-          <div class="toolbar">
-            <button id="bulk-enable">${"Audit displayed"}</button>
-            <button id="bulk-disable">${"Disable audit"}</button>
-            <button id="export">${"Export CSV"}</button>
-            <button id="download-labels" ${this._buildingLabels ? "disabled" : ""}>${this._buildingLabels ? "Creating PDF…" : "Create labels (PDF)"}</button>
-            <button id="download-tronic-labels" ${this._buildingLabels ? "disabled" : ""}>${this._buildingLabels ? "Creating PDF…" : "Create TRONIC 30 × 14 mm PDF"}</button>
-          </div>
-          <fieldset class="brother-print"><legend>Brother label printing</legend>
-            <label class="select-wrap">Printer<select id="brother-printer" ${this._buildingLabels || this._printingLabels ? "disabled" : ""}><option value="ql820nwb" ${this._brotherPrinter === "ql820nwb" ? "selected" : ""}>Brother QL-820NWB</option><option value="vc500w" ${this._brotherPrinter === "vc500w" ? "selected" : ""}>Brother VC-500W</option></select></label>
-            <label class="select-wrap">${this._brotherPrinter === "vc500w" ? "CZ roll" : "DK roll"}<select id="brother-roll" ${this._buildingLabels || this._printingLabels ? "disabled" : ""}>${this._brotherRollOptions().map((roll) => `<option value="${roll.id}" ${roll.id === this._brotherRoll ? "selected" : ""}>${roll.name}</option>`).join("")}</select></label>
-            ${this._brotherRollOptions().find((roll) => roll.id === this._brotherRoll)?.length === null ? `<label>Cut length (mm)<input id="brother-length" type="number" min="30" max="300" step="1" value="${this._escape(this._brotherLength)}" ${this._buildingLabels || this._printingLabels ? "disabled" : ""}></label>` : ""}
-            <button id="download-brother-labels" ${this._buildingLabels || this._printingLabels ? "disabled" : ""}>${this._buildingLabels ? "Creating PDF…" : "Create Brother label PDF"}</button>
-            <button id="print-brother-labels" ${this._buildingLabels || this._printingLabels || !this._brotherPrinters[this._brotherPrinter] || !this._labelDevices(rows).length ? "disabled" : ""}>Print ${this._labelDevices(rows).length} devices</button>
-            ${this._printingLabels ? `<button id="stop-brother-print">Stop after current label</button>` : ""}
-            <p role="status" aria-live="polite">${this._escape(this._printStatus)}</p>
-            ${!this._brotherPrinters[this._brotherPrinter] ? "<p>To enable direct printing, configure this printer's IP address or hostname in Settings → Devices &amp; services → Entity Audit → Configure.</p>" : ""}
-            <p>One page per device. Uses the label variant selected in integration settings. Match the roll in the print dialog and print at actual size (100%). Open or share the PDF to print with AirPrint or a Brother driver. Rolls narrower than 25 mm require the text-only variant.</p>
-          </fieldset>
-          <p class="privacy-note">TRONIC 30 × 14 mm creates one compact PDF page per device for the 14 × 30 mm label roll. It contains the device name, IP address, MAC address, and area. Use Open or save PDF / Share PDF to send it to the printer app; direct Bluetooth printing from this browser panel is not supported.</p>
-          </details>
+
           <div class="filters">
           <select id="device-filter" class="device-filter" aria-label="${"Filter by device"}">
             <option value="">${"All devices"}</option>
@@ -3368,6 +3243,32 @@ class EntityAuditPanel extends HTMLElement {
           </select>
           </div>
         </section>
+        <!-- Akce jsou samostatné, aby byly na mobilu dostupné i při zavřených filtrech. -->
+          <details class="print-options" ${this._printOptionsOpen ? "open" : ""}><summary>Actions: audit, export and labels</summary>
+          <p class="action-heading">Audit displayed entities</p>
+          <div class="toolbar">
+            <button id="bulk-enable">${"Audit displayed"}</button>
+            <button id="bulk-disable">${"Disable audit"}</button>
+          </div>
+          <p class="action-heading">Export and labels</p>
+          <div class="toolbar">
+            <button id="export">${"Export CSV"}</button>
+            <button id="download-labels" ${this._buildingLabels ? "disabled" : ""}>${this._buildingLabels ? "Creating PDF…" : "Create labels (PDF)"}</button>
+          </div>
+          <details class="brother-options" ${this._brotherOptionsOpen ? "open" : ""}><summary>Brother printer options</summary>
+          <fieldset class="brother-print"><legend>Brother label printing</legend>
+            <label class="select-wrap">Printer<select id="brother-printer" ${this._buildingLabels || this._printingLabels ? "disabled" : ""}><option value="ql820nwb" ${this._brotherPrinter === "ql820nwb" ? "selected" : ""}>Brother QL-820NWB</option><option value="vc500w" ${this._brotherPrinter === "vc500w" ? "selected" : ""}>Brother VC-500W</option></select></label>
+            <label class="select-wrap">${this._brotherPrinter === "vc500w" ? "CZ roll" : "DK roll"}<select id="brother-roll" ${this._buildingLabels || this._printingLabels ? "disabled" : ""}>${this._brotherRollOptions().map((roll) => `<option value="${roll.id}" ${roll.id === this._brotherRoll ? "selected" : ""}>${roll.name}</option>`).join("")}</select></label>
+            ${this._brotherRollOptions().find((roll) => roll.id === this._brotherRoll)?.length === null ? `<label>Cut length (mm)<input id="brother-length" type="number" min="30" max="300" step="1" value="${this._escape(this._brotherLength)}" ${this._buildingLabels || this._printingLabels ? "disabled" : ""}></label>` : ""}
+            <button id="download-brother-labels" ${this._buildingLabels || this._printingLabels ? "disabled" : ""}>${this._buildingLabels ? "Creating PDF…" : "Create Brother label PDF"}</button>
+            <button id="print-brother-labels" ${this._buildingLabels || this._printingLabels || !this._brotherPrinters[this._brotherPrinter] || !this._labelDevices(rows).length ? "disabled" : ""}>Print ${this._labelDevices(rows).length} devices</button>
+            ${this._printingLabels ? `<button id="stop-brother-print">Stop after current label</button>` : ""}
+            <p role="status" aria-live="polite">${this._escape(this._printStatus)}</p>
+            ${!this._brotherPrinters[this._brotherPrinter] ? "<p>To enable direct printing, configure this printer's IP address or hostname in Settings → Devices &amp; services → Entity Audit → Configure.</p>" : ""}
+            <p>One page per device. Uses the label variant selected in integration settings. Match the roll in the print dialog and print at actual size (100%). Open or share the PDF to print with AirPrint or a Brother driver. Rolls narrower than 25 mm require the text-only variant.</p>
+          </fieldset>
+          </details>
+          </details>
         <section class="pair-print" aria-label="Dva štítky vedle sebe">
           <strong>Dva štítky vedle sebe (${this._labelPair.size}/2)</strong>
           <button id="print-pair" ${this._labelPair.size !== 2 || this._printingLabels || this._buildingLabels ? "disabled" : ""}>Vytisknout dvojici</button>
@@ -3427,6 +3328,8 @@ class EntityAuditPanel extends HTMLElement {
       this._render();
     });
     this.shadowRoot.querySelector(".print-options")?.addEventListener("toggle", (event) => { this._printOptionsOpen = event.target.open; });
+    // Při překreslení panelu zachováme otevřené volby tiskárny i rozpracovaný tisk.
+    this.shadowRoot.querySelector(".brother-options")?.addEventListener("toggle", (event) => { this._brotherOptionsOpen = event.target.open; });
     this.shadowRoot.querySelector("#search")?.addEventListener("input", (event) => {
       this._filter = event.target.value;
       this._render();
@@ -3448,7 +3351,6 @@ class EntityAuditPanel extends HTMLElement {
     this.shadowRoot.querySelector("#bulk-disable")?.addEventListener("click", () => this._bulkSet(rows, false));
     this.shadowRoot.querySelector("#export")?.addEventListener("click", () => this._exportCsv(rows));
     this.shadowRoot.querySelector("#download-labels")?.addEventListener("click", () => this._downloadLabelsPdf(rows));
-    this.shadowRoot.querySelector("#download-tronic-labels")?.addEventListener("click", () => this._downloadTronicLabelsPdf(rows));
     this.shadowRoot.querySelector("#brother-roll")?.addEventListener("change", (event) => {
       this._brotherRoll = event.target.value;
       this._render();

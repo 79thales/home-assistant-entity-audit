@@ -46,7 +46,7 @@ const textContext = {
     return { width: Array.from(String(value)).length * size * 0.55 };
   },
 };
-const longTitle = panel._fitTronicTitle(
+const longTitle = panel._fitLabelTitle(
   textContext,
   "Android_e9a3d16ba2834b5b_device_tracker",
   200,
