@@ -33,6 +33,8 @@ Entity Audit is a HACS-compatible custom integration that gives administrators o
 - offers Brother QL-820NWB PDF profiles for DK-11209 (62 × 29 mm), DK-11201 (29 × 90 mm), DK-11202 (62 × 100 mm), and continuous DK-22205 (62 mm) / DK-22210 (29 mm) rolls with a selectable 30–300 mm cut length; each device gets one page at the physical media size, using the configured label variant;
 - offers Brother VC-500W PDF profiles for CZ-1001 (9 mm), CZ-1002 (12 mm), CZ-1003 (19 mm), CZ-1004 (25 mm), and CZ-1005 (50 mm) continuous rolls with a selectable 30–300 mm cut length and 313 dpi artwork; narrow rolls use a two-column text layout and require text-only mode below 25 mm;
 - prints labels directly from the panel through Home Assistant to configured Brother QL-820NWB and VC-500W network printers; the same action works from iOS without a PDF download;
+- opens a label editor from an entity row to change the printed title, preview VC-500W output, choose media, and confirm printing; administrators can save up to 50 named printer/media/layout templates in Home Assistant;
+- places two selected entity or device labels side by side on a VC-500W 50 mm CZ-1005 roll with a gap for manual separation and one print submission; confirm physical length, QR readability and cutting on the actual printer;
 - scans Entity Audit QR labels with the device camera or an existing photo/file, displays a virtual label, and matches it to the current inventory by MAC or IP address; live-camera startup waits up to an editable 5-second default before offering the photo/file fallback;
 - opens the matched Home Assistant device page directly or filters the inventory to that device;
 - opens the native Home Assistant entity detail by clicking its current state;
@@ -43,7 +45,7 @@ Entity Audit is a HACS-compatible custom integration that gives administrators o
 - records state transitions, problem starts, and recoveries;
 - shows a bounded per-entity timeline in an administrator-only sidebar panel;
 - stores data locally in Home Assistant `.storage` with configurable retention and event limits;
-- uses English-only integration configuration and panel labels.
+- uses English integration configuration, with Czech controls for the new label editor and printing actions.
 
 Entity Audit complements Home Assistant's built-in Recorder, History, and Activity features. Its opt-in timeline is stored independently and starts only after auditing is enabled for an entity; it does not query or backfill Recorder data. It is intended as a compact diagnostic audit, not a replacement for long-term statistics.
 

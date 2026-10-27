@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.32 – 2026-10-27
+
+### English
+
+- Fixes VC-500W replies containing a NUL separator, firmware model name Wedge and nominal CZ roll widths. A real printer accepted and physically printed a test label; physical cut length and other firmware variants remain unverified.
+- Adds per-entity and per-device direct printing with a label editor, editable title, printer and media choices, preview for VC-500W and confirmation before submission.
+- Adds two labels across a single 50 mm VC-500W roll, with a gap for manual separation and a single print submission. Verify actual size, legibility and QR scanning on your printer before regular use.
+- Adds up to 50 named label-layout templates stored in Home Assistant and available to administrators across devices, plus entity-label QR scanning.
+- Compacts mobile filter and print controls and improves use of available label space. Printing never retries automatically after an uncertain response.
+
+### Čeština
+
+- Opravuje načítání odpovědi VC-500W s nulovým oddělovačem, označením Wedge a šířkou CZ role v palcích. Jedna skutečná tiskárna přijala a vytiskla zkušební štítek; přesná délka odstřihu a jiné verze firmwaru nejsou ověřeny.
+- Přidává tisk entity nebo zařízení, úpravu názvu, výběr tiskárny a role, náhled VC-500W a potvrzení před odesláním.
+- Umožňuje umístit dva štítky vedle sebe na 50mm pásku VC-500W s mezerou pro ruční rozstřižení a jedním tiskovým požadavkem. Skutečnou velikost, čitelnost a skenování QR ověřte na své tiskárně.
+- Přidává až 50 pojmenovaných šablon rozložení uložených v Home Assistantu pro administrátory a čtení QR štítků entit.
+- Zpřehledňuje mobilní nabídku a využití plochy štítku. Při nejistém výsledku se tisk automaticky neopakuje.
+
 ## 0.3.31 – 2026-10-25
 
 ### English

@@ -20,6 +20,7 @@ if __name__ == "__main__":
         "custom_components.entity_audit.const",
         "custom_components.entity_audit.diagnostics",
         "custom_components.entity_audit.manager",
+        "custom_components.entity_audit.label_templates",
         "custom_components.entity_audit.network",
         "custom_components.entity_audit.websocket",
     ):

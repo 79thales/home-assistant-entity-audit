@@ -33,6 +33,7 @@ from .const import (
     QR_READER_LIBRARY_URL,
 )
 from .manager import EntityAuditManager
+from .label_templates import LabelTemplates
 from .printing import PrintService
 from .websocket import async_register_websocket_commands
 
@@ -55,9 +56,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         values.get(CONF_LABEL_HEIGHT, DEFAULT_LABEL_HEIGHT),
         values.get(CONF_LABEL_VARIANT, DEFAULT_LABEL_VARIANT),
     )
+    # Úložiště šablon ověříme před spuštěním sledování, aby případná chyba
+    # nenechala po nezdařeném startu aktivní posluchače historie.
+    templates = LabelTemplates(hass)
+    await templates.async_load()
     await manager.async_start()
     runtime = hass.data.setdefault(DOMAIN, {})
     runtime["manager"] = manager
+    runtime["label_templates"] = templates
     runtime["printing"] = PrintService({
         "ql820nwb": values.get(CONF_BROTHER_QL_HOST, ""),
         "vc500w": values.get(CONF_BROTHER_VC_HOST, ""),
@@ -106,6 +112,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     runtime = hass.data[DOMAIN]
     manager: EntityAuditManager = runtime.pop("manager")
     runtime.pop("printing", None)
+    runtime.pop("label_templates", None)
     await manager.async_stop()
     async_remove_panel(hass, DOMAIN)
     return True

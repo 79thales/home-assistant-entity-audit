@@ -176,7 +176,8 @@ class TransportTest(unittest.IsolatedAsyncioTestCase):
         async def peer(reader, writer):
             request = await reader.readuntil(b"</read>")
             self.assertIn(b"/config.xml", request)
-            writer.write(vc_reply('<config><model_name>VC-500W</model_name><media_features><width_inches>1.9685</width_inches></media_features></config>'))
+            # Odpovídá zjištěnému označení modelu, šířce a oddělovači reálné tiskárny.
+            writer.write(vc_reply('<config><model_name>Wedge</model_name><media_features><width_inches>2.000</width_inches></media_features></config>').replace(b'\n ', b'\n\x00'))
             await writer.drain()
             self.assertIn(b"/status.xml", await reader.readuntil(b"</read>"))
             writer.write(vc_reply("<status><print_state>IDLE</print_state><print_job_error>NONE</print_job_error></status>"))
@@ -212,7 +213,7 @@ class TransportTest(unittest.IsolatedAsyncioTestCase):
     async def test_wrong_cz_roll_is_rejected_before_print_header(self):
         async def peer(reader, writer):
             await reader.readuntil(b"</read>")
-            writer.write(vc_reply('<config><model_name>VC-500W</model_name><media_features><width_inches>0.98425</width_inches></media_features></config>'))
+            writer.write(vc_reply('<config><model_name>Wedge</model_name><media_features><width_inches>1.000</width_inches></media_features></config>'))
             await writer.drain()
             self.assertEqual(await reader.read(), b"")
         async def action():

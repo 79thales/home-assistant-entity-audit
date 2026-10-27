@@ -1,0 +1,3 @@
+# Distribuovaná knihovna čtečky QR má kontrolovaný byteový otisk; Git nesmí
+# při checkoutu měnit konce řádků, jinak se poruší ověření integrity.
+custom_components/entity_audit/frontend/jsQR.js -text

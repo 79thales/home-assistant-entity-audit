@@ -40,6 +40,7 @@ jobs:
         run: |
           node --check custom_components/entity_audit/frontend/entity-audit-panel.js
           node tests/test_qrcode.js
+          node tests/test_direct_entity.js
       - name: Compile integration and packaging script
         run: python -m compileall -q custom_components/entity_audit scripts
       - name: Build and validate installer from the tagged commit

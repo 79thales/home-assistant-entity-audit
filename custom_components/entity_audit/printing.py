@@ -40,6 +40,8 @@ QL_ROLLS = {
     "dk_11202": (62, 100, 696, 12, 1109),
 }
 VC_ROLLS = {"cz_1001": 9, "cz_1002": 12, "cz_1003": 19, "cz_1004": 25, "cz_1005": 50}
+# Firmware uvádí jmenovitou šířku v palcích, ne zaokrouhlené označení v mm.
+VC_ROLL_INCHES = {"cz_1001": 0.375, "cz_1002": 0.5, "cz_1003": 0.75, "cz_1004": 1.0, "cz_1005": 2.0}
 
 
 class PrintError(Exception):
@@ -181,8 +183,9 @@ def _xml(data: bytes) -> ET.Element:
 async def _vc_reply(reader: asyncio.StreamReader) -> tuple[ET.Element, ET.Element | None]:
     """Read the XML status and optional length-framed payload from VC-500W.
 
-    The wire separator is '</status>\n', followed by one space before the
-    payload. A reply timeout, EOF or malformed size aborts without retransmit.
+    Po stavovém XML může před přesně odměřeným tělem přijít oddělovací
+    mezera nebo nulový bajt (ověřeno na VC-500W). Délka patří jen tělu.
+    Timeout, neúplná či chybná odpověď ukončí pokus bez opětovného tisku.
     """
     raw = await asyncio.wait_for(reader.readuntil(b"</status>\n"), REPLY_TIMEOUT)
     status = _xml(raw)
@@ -197,7 +200,7 @@ async def _vc_reply(reader: asyncio.StreamReader) -> tuple[ET.Element, ET.Elemen
     payload = None
     if size:
         first = await asyncio.wait_for(reader.readexactly(1), REPLY_TIMEOUT)
-        if first in (b" ", b"\n", b"\r"):
+        if first in (b"\x00", b" ", b"\n", b"\r"):
             data = await asyncio.wait_for(reader.readexactly(size), REPLY_TIMEOUT)
         else:
             data = first + await asyncio.wait_for(reader.readexactly(size - 1), REPLY_TIMEOUT)
@@ -272,13 +275,17 @@ class PrintService:
                                 break
                     else:
                         _, config = await _vc_command(reader, writer, "<read><path>/config.xml</path></read>")
-                        if config is None or config.tag != "config" or "VC500W" not in re.sub(r"[^A-Z0-9]", "", config.findtext("model_name", "").upper()):
+                        # Skutečný firmware identifikuje zařízení jako Wedge;
+                        # tento název sám o sobě nezaručuje přesný model, proto
+                        # stále ověřujeme strukturu konfigurace a vloženou roli.
+                        model_name = re.sub(r"[^A-Z0-9]", "", config.findtext("model_name", "").upper()) if config is not None else ""
+                        if config is None or config.tag != "config" or not ("VC500W" in model_name or model_name == "WEDGE"):
                             raise PrintError("The endpoint did not identify itself as a VC-500W.")
                         try:
-                            loaded_width = float(config.findtext("media_features/width_inches", "nan")) * 25.4
+                            loaded_width = float(config.findtext("media_features/width_inches", "nan"))
                         except ValueError:
                             loaded_width = math.nan
-                        if not math.isfinite(loaded_width) or abs(loaded_width - label.width_mm) > 0.6:
+                        if not math.isfinite(loaded_width) or abs(loaded_width - VC_ROLL_INCHES[label.roll]) > 0.01:
                             raise PrintError("The loaded CZ roll does not match the selected roll.")
                         _, status = await _vc_command(reader, writer, "<read><path>/status.xml</path></read>")
                         if status is None or status.findtext("print_state") != "IDLE" or status.findtext("print_job_error", "NONE") not in ("", "NONE", "0"):

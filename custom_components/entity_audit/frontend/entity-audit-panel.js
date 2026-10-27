@@ -38,10 +38,16 @@ class EntityAuditPanel extends HTMLElement {
     this._brotherPrinter = "ql820nwb";
     this._brotherLength = 40;
     this._brotherPrinters = {};
+    // Výběr páru zůstává zachován i při změně filtru; obsahuje ID a typ štítku.
+    this._labelPair = new Map();
+    this._labelEditor = null;
+    this._labelTemplates = [];
+    this._labelTemplateId = "";
     this._printingLabels = false;
     this._printStatus = "";
     this._stopPrintRun = false;
     this._filtersOpen = false;
+    this._printOptionsOpen = false;
     this._labelPdf = null;
     this._qrLibraryPromise = null;
     this._qrReaderLibraryPromise = null;
@@ -107,6 +113,19 @@ class EntityAuditPanel extends HTMLElement {
       this._labelHeight = settings.label_height_mm;
       this._labelVariant = settings.label_variant;
       this._brotherPrinters = settings.brother_printers || {};
+      // Šablony jsou sdílené v HA. Nedostupnost API nesmí skrýt seznam entit.
+      try { this._labelTemplates = await this._hass.callWS({ type: "entity_audit/list_label_templates" }); }
+      catch (_error) { this._labelTemplates = []; }
+      // Při prvním načtení zvolíme jedinou dostupnou tiskárnu; pozdější
+      // uživatelský výběr už další obnovení seznamu nepřepisuje.
+      if (!this._printerChoiceInitialized) {
+        const configured = Object.keys(this._brotherPrinters).filter((model) => this._brotherPrinters[model]);
+        if (configured.length === 1 && ["vc500w", "ql820nwb"].includes(configured[0])) {
+          this._brotherPrinter = configured[0];
+          this._brotherRoll = this._brotherRollOptions()[0].id;
+        }
+        this._printerChoiceInitialized = true;
+      }
       this._entityAuditVersion = settings.integration_version || this._entityAuditVersion;
       this._backupExportFormatVersion = settings.backup_export_format_version || this._backupExportFormatVersion;
       if (this._selected) {
@@ -1352,6 +1371,8 @@ class EntityAuditPanel extends HTMLElement {
   }
 
   _labelQrPayload(entity) {
+    // Štítek entity obsahuje stabilní ID, aby fungoval i bez zařízení a IP.
+    if (entity._entityLabel) return JSON.stringify({ name: entity.name, entity_id: entity.entity_id });
     return JSON.stringify({
       name: entity.device_name || entity.name,
       ip_address: entity.ip_address,
@@ -1400,6 +1421,11 @@ class EntityAuditPanel extends HTMLElement {
       if (required && !normalized) throw new Error("Invalid QR payload");
       return normalized || null;
     };
+    if (value.entity_id != null) {
+      const entityId = readField("entity_id", true);
+      if (!/^[a-z0-9_]+\.[a-z0-9_]+$/.test(entityId)) throw new Error("Invalid entity ID");
+      return { name: readField("name", true), entity_id: entityId };
+    }
     return {
       name: readField("name", true),
       ip_address: readField("ip_address", true),
@@ -1410,6 +1436,7 @@ class EntityAuditPanel extends HTMLElement {
   }
 
   _matchScannedDevice(label) {
+    if (label.entity_id) return null;
     const entitiesWithDevice = this._entities.filter((entity) => entity.device_id);
     const findUniqueDevice = (predicate) => {
       const matches = [...new Map(
@@ -1552,17 +1579,18 @@ class EntityAuditPanel extends HTMLElement {
       <div class="scanner-body">
         ${this._scanResult ? `<section class="virtual-label">
           <h3>${this._escape(this._scanResult.name)}</h3>
-          <dl class="label-detail">
+          ${this._scanResult.entity_id ? `<dl class="label-detail"><dt>Entita</dt><dd>${this._escape(this._scanResult.entity_id)}</dd></dl>` : `<dl class="label-detail">
             <dt>${"IP address"}</dt><dd>${this._escape(this._scanResult.ip_address || "—")}</dd>
             <dt>${"MAC address"}</dt><dd>${this._escape(this._scanResult.mac_address || "—")}</dd>
             <dt>${"Manufacturer"}</dt><dd>${this._escape(this._scanResult.manufacturer || "—")}</dd>
             <dt>${"Area"}</dt><dd>${this._escape(this._scanResult.area || "—")}</dd>
-          </dl>
+          </dl>`}
         </section>
-        <div class="${this._scanMatchedDevice ? "match-ok" : "match-missing"}">${this._scanMatchedDevice
+        ${this._scanResult.entity_id ? `<div class="${this._entities.some((item) => item.entity_id === this._scanResult.entity_id) ? "match-ok" : "match-missing"}">${this._entities.some((item) => item.entity_id === this._scanResult.entity_id) ? "Entita byla nalezena." : "Entita nebyla nalezena."}</div>` : `<div class="${this._scanMatchedDevice ? "match-ok" : "match-missing"}">${this._scanMatchedDevice
           ? "The device was found in the current inventory."
-          : "The device could not be uniquely matched in the current inventory."}</div>
+          : "The device could not be uniquely matched in the current inventory."}</div>`}
         <div class="scanner-actions">
+          ${this._scanResult.entity_id && this._entities.some((item) => item.entity_id === this._scanResult.entity_id) ? `<button id="open-scanned-entity">Otevřít entitu</button>` : ""}
           ${this._scanMatchedDevice ? `<button id="filter-scanned-device">${"Show its entities"}</button><a id="open-scanned-device" class="primary-link" href="/config/devices/device/${this._escape(this._scanMatchedDevice.device_id)}">${"Open device page"}</a>` : ""}
           <button id="scan-again">${"Scan again"}</button>
         </div>` : `${liveCameraAvailable && !this._scannerTimedOut ? `<div class="camera-stage"><video id="scanner-video" muted playsinline></video><div class="camera-guide"></div><div class="camera-hint">${this._scannerStarting ? `Waiting for camera permission (up to ${waitSeconds} s)…` : "Place the QR code inside the frame"}</div></div>` : `<div class="scanner-note">${this._scannerTimedOut ? "The live camera did not open in the configured time. You can retry it or scan a QR-code photo." : "Live camera access is unavailable in this connection. Scan a QR-code photo or file instead."}</div>`}`}
@@ -1591,6 +1619,11 @@ class EntityAuditPanel extends HTMLElement {
     this._scannerDialog.querySelector("#scan-again")?.addEventListener("click", () => this._startScanner());
     this._scannerDialog.querySelector("#retry-camera")?.addEventListener("click", () => this._startScanner());
     this._scannerDialog.querySelector("#filter-scanned-device")?.addEventListener("click", () => this._filterToScannedDevice());
+    this._scannerDialog.querySelector("#open-scanned-entity")?.addEventListener("click", () => {
+      const entityId = this._scanResult?.entity_id;
+      this._closeScanner();
+      if (entityId) this._showEntity(entityId);
+    });
     this._scannerDialog.querySelector("#open-scanned-device")?.addEventListener("click", () => this._recordActivity("scanned_device_page_opened", "info", this._scanMatchedDevice?.device_id));
     this._scannerDialog.querySelector("#scan-camera-image")?.addEventListener("change", (event) => this._scanImageFile(event.target.files?.[0]));
     this._scannerDialog.querySelector("#scan-image")?.addEventListener("change", (event) => this._scanImageFile(event.target.files?.[0]));
@@ -1781,6 +1814,9 @@ class EntityAuditPanel extends HTMLElement {
     code.make();
     const moduleCount = code.getModuleCount();
     const quietZone = 4;
+    // Kód větší než přidělená oblast by se nevešel ani při jednom pixelu
+    // na modul. Selžeme před odesláním místo oříznutého nečitelného QR.
+    if (moduleCount + quietZone * 2 > size) throw new Error("QR kód je příliš složitý pro vybranou velikost štítku.");
     const cellSize = Math.max(1, Math.floor(size / (moduleCount + (quietZone * 2))));
     const qrSize = cellSize * (moduleCount + (quietZone * 2));
     const left = Math.round(x + ((size - qrSize) / 2));
@@ -2116,6 +2152,30 @@ class EntityAuditPanel extends HTMLElement {
     const variant = this._labelVariant;
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, width, height);
+    if (entity._entityLabel) {
+      // ID entity se nesmí nahradit IP zařízení. Dlouhé hodnoty zalomíme a
+      // zmenšíme, QR obsahuje úplné ID i v případě, že je text velmi dlouhý.
+      const qrSize = variant === "text" ? 0 : variant === "qr"
+        ? Math.min(width, height) - margin * 2 : Math.min(height - margin * 2, Math.floor(width * 0.44));
+      if (variant !== "qr") {
+        const textWidth = width - margin * 2 - (qrSize ? qrSize + margin : 0);
+        let cursor = margin;
+        for (const [text, weight, max] of [[entity.name, "700", 42], [entity.entity_id, "600", 27]]) {
+          const fitted = this._fitTronicTitle(context, text, textWidth, 3, max, 11);
+          context.fillStyle = "#000000";
+          context.font = `${weight} ${fitted.size}px Arial, sans-serif`;
+          for (const line of fitted.lines) {
+            cursor += fitted.size;
+            context.fillText(line, margin, cursor);
+            cursor += 4;
+          }
+        }
+      }
+      if (qrSize) this._drawQr(context, this._labelQrPayload(entity),
+        variant === "qr" ? (width - qrSize) / 2 : width - margin - qrSize,
+        (height - qrSize) / 2, qrSize);
+      return;
+    }
     if (height < 240 && variant === "text") {
       // On narrow CZ tape, use the long axis and two columns for the four
       // fields. This preserves MAC, manufacturer and area within the height.
@@ -2150,9 +2210,12 @@ class EntityAuditPanel extends HTMLElement {
       this._drawQr(context, this._labelQrPayload(entity), (width - size) / 2, (height - size) / 2, size);
       return;
     }
-    const qrSize = variant === "text_qr" ? Math.min(height - margin * 2, Math.floor(width * 0.38)) : 0;
+    // Rozložení počítáme z celé tisknutelné plochy, nikoli z pevného počtu
+    // pixelů. QR je větší a uprostřed výšky; čtyři řádky rozdělíme až ke
+    // spodnímu okraji. Dlouhé hodnoty se přizpůsobí dostupné šířce.
+    const qrSize = variant === "text_qr" ? Math.min(height - margin * 2, Math.floor(width * 0.44)) : 0;
     const textWidth = width - margin * 2 - (qrSize ? qrSize + margin : 0);
-    const title = this._fitTronicTitle(context, entity.device_name || entity.name, textWidth, 2, 42, 18);
+    const title = this._fitTronicTitle(context, entity.device_name || entity.name, textWidth, 2, Math.max(18, Math.floor(height * 0.15)), 18);
     context.fillStyle = "#000000";
     context.font = `700 ${title.size}px Arial, sans-serif`;
     let cursor = margin;
@@ -2167,18 +2230,19 @@ class EntityAuditPanel extends HTMLElement {
       `Manufacturer: ${entity.manufacturer || "not available"}`,
       `Area: ${entity.area_name || "not available"}`,
     ];
+    const rowHeight = Math.max(1, (height - margin - cursor) / fields.length);
     for (const field of fields) {
-      let size = 26;
+      let size = Math.max(14, Math.min(48, Math.floor(rowHeight * 0.72)));
       context.font = `600 ${size}px Arial, sans-serif`;
       while (size > 14 && context.measureText(field).width > textWidth) {
         size -= 1;
         context.font = `600 ${size}px Arial, sans-serif`;
       }
-      cursor += 32;
+      cursor += rowHeight;
       context.fillText(this._truncateCanvasText(context, field, textWidth), margin, cursor);
     }
     if (qrSize) {
-      this._drawQr(context, this._labelQrPayload(entity), width - margin - qrSize, margin, qrSize);
+      this._drawQr(context, this._labelQrPayload(entity), width - margin - qrSize, (height - qrSize) / 2, qrSize);
     }
   }
 
@@ -2258,10 +2322,209 @@ class EntityAuditPanel extends HTMLElement {
       : canvas.toDataURL("image/jpeg", 0.96).split(",")[1];
   }
 
-  async _printBrotherLabels(rows) {
+  _brotherPairImage(items, format) {
+    // Jediný JPEG pro 50mm CZ roli rozdělíme napříč páskou na dva pruhy.
+    // Každý pruh má vlastní orientaci, QR a ochranný bílý předěl pro ruční
+    // rozstřižení. Tiskárně se odešle jeden obrázek a jediný příkaz střihu.
+    const width = Math.round(format.width / 25.4 * 313);
+    const height = Math.round(format.length / 25.4 * 317);
+    const gap = 6;
+    const half = Math.floor((width - gap) / 2);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, width, height);
+    items.forEach((item, index) => {
+      context.save();
+      context.translate(index ? width - half : 0, 0);
+      context.beginPath();
+      context.rect(0, 0, half, height);
+      context.clip();
+      if (height > half) {
+        context.translate(0, height);
+        context.rotate(-Math.PI / 2);
+        this._drawBrotherLabel(context, height, half, item);
+      } else {
+        this._drawBrotherLabel(context, half, height, item);
+      }
+      context.restore();
+    });
+    return canvas.toDataURL("image/jpeg", 0.96).split(",")[1];
+  }
+
+  _setPairItem(entity, kind) {
+    if (!kind) this._labelPair.delete(entity.entity_id);
+    else if (!this._labelPair.has(entity.entity_id) && this._labelPair.size >= 2) {
+      alert("V páru mohou být nejvýše dvě položky. Nejprve některou odeber.");
+    } else if (kind === "entity" || (kind === "device" && entity.device_id && entity.ip_address)) {
+      this._labelPair.set(entity.entity_id, kind);
+    }
+    this._render();
+  }
+
+  _openLabelEditor(selected) {
+    // Pracovní kopie umožní změnit tištěný název bez změny entity ani
+    // registru zařízení v HA. ID/IP zůstávají navázané na původní položku.
+    this._labelEditor = selected.map(({ entity, kind }) => ({
+      kind, entity: { ...entity },
+      title: kind === "device" ? (entity.device_name || entity.name) : entity.name,
+    }));
+    this._render();
+    this._refreshLabelPreview();
+  }
+
+  _editedLabelItems() {
+    return this._labelEditor.map(({ entity, kind, title }) => ({
+      ...entity, name: title.trim(), ...(kind === "device" ? { device_name: title.trim() } : { _entityLabel: true }),
+    }));
+  }
+
+  async _refreshLabelPreview() {
+    // Každá změna ruší starší asynchronní výsledek načítání QR knihovny.
+    const sequence = this._previewSequence = (this._previewSequence || 0) + 1;
+    const preview = this.shadowRoot.querySelector("#label-preview");
+    const error = this.shadowRoot.querySelector("#label-preview-error");
+    if (!preview || !this._labelEditor) return;
+    try {
+      if (this._labelEditor.some((item) => !item.title.trim())) throw new Error("Název štítku nesmí být prázdný.");
+      const format = this._brotherLabelFormat();
+      if (this._labelEditor.length === 2 && (this._brotherPrinter !== "vc500w" || format.id !== "cz_1005")) {
+        throw new Error("Dvojice vyžaduje VC-500W a roli CZ-1005.");
+      }
+      if (this._labelVariant !== "text") await this._loadQrLibrary();
+      const items = this._editedLabelItems();
+      const data = items.length === 2 ? this._brotherPairImage(items, format)
+        : this._brotherDirectImage(items[0], format, this._brotherPrinter);
+      if (sequence !== this._previewSequence || !this._labelEditor) return;
+      // QL používá binární rastrová data, proto JPEG náhled podporujeme jen
+      // pro VC-500W; u QL zobrazíme jasné vysvětlení místo falešného náhledu.
+      if (this._brotherPrinter !== "vc500w") {
+        preview.removeAttribute("src");
+        error.textContent = "Náhled obrázku je dostupný pro VC-500W.";
+        return;
+      }
+      preview.src = `data:image/jpeg;base64,${data}`;
+      error.textContent = "";
+    } catch (exception) {
+      if (sequence !== this._previewSequence) return;
+      preview.removeAttribute("src");
+      if (error) error.textContent = exception?.message || "Náhled nelze vytvořit.";
+    }
+  }
+
+  async _saveLabelTemplate(overwrite = false) {
+    const previous = this._labelTemplates.find((entry) => entry.id === this._labelTemplateId);
+    if (overwrite && !previous) return;
+    const name = prompt(overwrite ? "Název upravené šablony:" : "Název nové šablony:", previous?.name || "");
+    if (name === null) return;
+    try {
+      const format = this._brotherLabelFormat();
+      await this._hass.callWS({ type: "entity_audit/save_label_template",
+        ...(overwrite ? { template_id: previous.id } : {}),
+        template: { name, model: this._brotherPrinter, roll: format.id, length_mm: format.length, variant: this._labelVariant } });
+      this._labelTemplates = await this._hass.callWS({ type: "entity_audit/list_label_templates" });
+      this._render();
+      this._refreshLabelPreview();
+    } catch (error) { alert(error.message || "Šablonu nelze uložit."); }
+  }
+
+  async _deleteLabelTemplate() {
+    const item = this._labelTemplates.find((entry) => entry.id === this._labelTemplateId);
+    if (!item || !confirm(`Opravdu smazat šablonu „${item.name}“?`)) return;
+    try {
+      await this._hass.callWS({ type: "entity_audit/delete_label_template", template_id: item.id });
+      this._labelTemplates = await this._hass.callWS({ type: "entity_audit/list_label_templates" });
+      this._labelTemplateId = "";
+      this._render();
+      this._refreshLabelPreview();
+    } catch (error) { alert(error.message || "Šablonu nelze smazat."); }
+  }
+
+  _applyLabelTemplate(id) {
+    this._labelTemplateId = id;
+    const item = this._labelTemplates.find((entry) => entry.id === id);
+    if (item) {
+      this._brotherPrinter = item.model;
+      this._brotherRoll = item.roll;
+      this._brotherLength = item.length_mm;
+      this._labelVariant = item.variant;
+    }
+    this._render();
+    this._refreshLabelPreview();
+  }
+
+  async _submitLabelEditor() {
+    if (!this._labelEditor || this._labelEditor.some((item) => !item.title.trim())) {
+      alert("Vyplň název každého štítku.");
+      return;
+    }
+    const items = this._editedLabelItems();
+    const selected = this._labelEditor;
+    // Editor zůstává otevřený při zrušení potvrzení či chybě validace;
+    // uzavře se až po potvrzení konkrétní tiskové úlohy.
+    if (items.length === 2) await this._printBrotherPair(items);
+    else await this._printRowLabel(items[0], selected[0].kind, true);
+  }
+
+  async _printBrotherPair(editedItems = null) {
+    if (this._printingLabels || this._buildingLabels) return;
+    const selected = [...this._labelPair].map(([id, kind]) => ({
+      kind, entity: this._entities.find((item) => item.entity_id === id),
+    }));
+    if (selected.length !== 2 || selected.some(({ entity, kind }) => !entity || (kind === "device" && (!entity.device_id || !entity.ip_address)))) {
+      alert("Vyber dvě dostupné entity nebo zařízení s IP adresou.");
+      return;
+    }
+    if (!editedItems) {
+      this._openLabelEditor(selected);
+      return;
+    }
+    selected.forEach((item, index) => { item.entity = editedItems[index]; });
+    if (this._brotherPrinter !== "vc500w" || this._brotherRoll !== "cz_1005" || !this._brotherPrinters.vc500w) {
+      alert("Pro dvojici vyber nakonfigurovanou Brother VC-500W a 50mm roli CZ-1005.");
+      return;
+    }
+    let format;
+    try { format = this._brotherLabelFormat(); }
+    catch (error) { alert(error.message); return; }
+    const names = selected.map(({ entity, kind }) => kind === "entity"
+      ? `Entita: ${entity.name} (${entity.entity_id})`
+      : `Zařízení: ${entity.device_name || entity.name} (IP ${entity.ip_address})`);
+    if (!confirm(`Vytisknout dva štítky vedle sebe na jednu pásku?\n\n${names.join("\n")}\nBrother VC-500W · CZ-1005 · délka ${format.length} mm\nŠtítky bude nutné rozstřihnout ručně.`)) return;
+    this._labelEditor = null;
+    const items = selected.map(({ entity, kind }) => kind === "entity" ? { ...entity, _entityLabel: true } : entity);
+    this._printEntityId = null;
+    this._printingLabels = true;
+    this._printStatus = "Odesílám dvojici štítků…";
+    this._render();
+    try {
+      if (this._labelVariant !== "text") await this._loadQrLibrary();
+      const requestId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (v) => v.toString(16).padStart(2, "0")).join("");
+      const result = await this._hass.callWS({
+        type: "entity_audit/print_label", request_id: requestId, model: "vc500w",
+        roll: format.id, length_mm: format.length, image: this._brotherPairImage(items, format),
+      });
+      this._printStatus = result.state === "accepted"
+        ? "Tiskárna přijala pásku se dvěma štítky. Zkontroluj tisk a odstřih."
+        : result.state === "completed" ? "Tiskárna dokončila pásku se dvěma štítky."
+        : result.message || "Výsledek není jistý. Před dalším tiskem zkontroluj tiskárnu.";
+    } catch (error) {
+      this._printStatus = `${error?.message || "Spojení se přerušilo."} Před dalším tiskem zkontroluj tiskárnu.`;
+    } finally {
+      // Při nejistém výsledku se nikdy automaticky neopakuje odeslání.
+      this._printingLabels = false;
+      this._render();
+    }
+  }
+
+  async _printBrotherLabels(rows, singleEntity = false) {
     if (this._printingLabels || this._buildingLabels) return;
     const model = this._brotherPrinter;
-    const devices = this._labelDevices(rows);
+    // Jednotlivá entita může existovat bez zařízení i IP; hromadný tisk
+    // nadále deduplikuje zařízení podle IP a nemění své dosavadní chování.
+    const devices = singleEntity ? rows.map((entity) => ({ ...entity, _entityLabel: true })) : this._labelDevices(rows);
     if (!devices.length) {
       this._printStatus = "None of the displayed devices has an available IP address.";
       this._render();
@@ -2308,6 +2571,32 @@ class EntityAuditPanel extends HTMLElement {
       this._printStatus = `${completed} labels reported complete; ${accepted} labels accepted by printer.${this._stopPrintRun ? " Run stopped." : ""}${failure ? ` ${failure}` : ""}`;
       this._render();
     }
+  }
+
+  async _printRowLabel(entity, kind, edited = false) {
+    if (this._printingLabels || this._buildingLabels) return;
+    const model = this._brotherPrinter;
+    if (kind === "device" && (!entity.device_id || !entity.ip_address)) {
+      alert("Pro štítek zařízení chybí přiřazené zařízení nebo jeho IP adresa.");
+      return;
+    }
+    if (!edited) {
+      this._openLabelEditor([{ entity, kind }]);
+      return;
+    }
+    if (!this._brotherPrinters[model]) {
+      alert("Nejdříve nastav a vyber dostupnou tiskárnu Brother.");
+      return;
+    }
+    let format;
+    try { format = this._brotherLabelFormat(); }
+    catch (error) { alert(error.message); return; }
+    const printer = model === "vc500w" ? "Brother VC-500W" : "Brother QL-820NWB";
+    const subject = kind === "entity" ? `entita: ${entity.name}\n${entity.entity_id}` : `zařízení: ${entity.device_name || entity.name}\nIP: ${entity.ip_address}`;
+    if (!confirm(`Vytisknout jeden štítek?\n\n${subject}\nTiskárna: ${printer}\nRole: ${format.name}\nDélka: ${format.length} mm`)) return;
+    this._labelEditor = null;
+    this._printEntityId = entity.entity_id;
+    await this._printBrotherLabels([entity], kind === "entity");
   }
 
   async _downloadBrotherLabelsPdf(rows) {
@@ -2919,6 +3208,19 @@ class EntityAuditPanel extends HTMLElement {
         .ok { color:var(--success-color); }
         .switch { width:20px; height:20px; }
         .link, .state-button { min-height:0; color:var(--primary-color); background:transparent; border:0; padding:5px; }
+        .row-print-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+        .row-print-actions button { min-height:40px; padding:6px 9px; font-size:13px; }
+        .row-print-actions select { min-height:40px; max-width:100%; font-size:13px; color:var(--primary-text-color); background:var(--card-background-color); }
+        .print-options { margin:10px 0; border:1px solid var(--divider-color); border-radius:9px; padding:10px; }
+        .print-options summary { cursor:pointer; min-height:36px; font-weight:600; }
+        .print-options[open] summary { margin-bottom:10px; }
+        .pair-print { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:12px 0; padding:12px; border:1px solid var(--divider-color); border-radius:9px; }
+        .pair-print p { width:100%; margin:0; overflow-wrap:anywhere; }
+        .label-editor { width:min(620px, calc(100vw - 20px)); max-height:90vh; overflow:auto; }
+        .label-editor-body { padding:16px; display:grid; gap:10px; }
+        .label-editor-body label { display:grid; gap:4px; }
+        .label-editor-body input, .label-editor-body select { width:100%; min-height:44px; padding:8px; color:var(--primary-text-color); background:var(--card-background-color); border:1px solid var(--divider-color); border-radius:8px; }
+        .label-editor-body img { max-width:100%; max-height:220px; object-fit:contain; background:white; border:1px solid var(--divider-color); }
         .state-button { text-align:left; }
         .empty { text-align:center; padding:35px; color:var(--secondary-text-color); }
         dialog { width:min(850px, calc(100vw - 24px)); max-height:85vh; border:0; border-radius:14px; color:var(--primary-text-color); background:var(--card-background-color); padding:0; box-shadow:0 14px 50px #0006; }
@@ -3009,6 +3311,7 @@ class EntityAuditPanel extends HTMLElement {
         </section>
         ${this._labelPdf ? `<section class="pdf-ready"><span>${this._escape(this._labelPdf.readyMessage || "The label PDF is ready.")}</span><a id="download-label-pdf" href="${this._escape(this._labelPdf.url)}" download="${this._escape(this._labelPdf.filename)}">${"Open or save PDF"}</a>${navigator.canShare && navigator.share ? `<button id="share-label-pdf">${"Share PDF"}</button>` : ""}<button id="discard-label-pdf">✕</button></section>` : ""}
         <section class="filter-panel ${this._filtersOpen ? "open" : ""}">
+          <details class="print-options" ${this._printOptionsOpen ? "open" : ""}><summary>Tisk, export a hromadné akce</summary>
           <div class="toolbar">
             <button id="bulk-enable">${"Audit displayed"}</button>
             <button id="bulk-disable">${"Disable audit"}</button>
@@ -3028,6 +3331,7 @@ class EntityAuditPanel extends HTMLElement {
             <p>One page per device. Uses the label variant selected in integration settings. Match the roll in the print dialog and print at actual size (100%). Open or share the PDF to print with AirPrint or a Brother driver. Rolls narrower than 25 mm require the text-only variant.</p>
           </fieldset>
           <p class="privacy-note">TRONIC 30 × 14 mm creates one compact PDF page per device for the 14 × 30 mm label roll. It contains the device name, IP address, MAC address, and area. Use Open or save PDF / Share PDF to send it to the printer app; direct Bluetooth printing from this browser panel is not supported.</p>
+          </details>
           <div class="filters">
           <select id="device-filter" class="device-filter" aria-label="${"Filter by device"}">
             <option value="">${"All devices"}</option>
@@ -3064,6 +3368,13 @@ class EntityAuditPanel extends HTMLElement {
           </select>
           </div>
         </section>
+        <section class="pair-print" aria-label="Dva štítky vedle sebe">
+          <strong>Dva štítky vedle sebe (${this._labelPair.size}/2)</strong>
+          <button id="print-pair" ${this._labelPair.size !== 2 || this._printingLabels || this._buildingLabels ? "disabled" : ""}>Vytisknout dvojici</button>
+          <button id="clear-pair" ${!this._labelPair.size || this._printingLabels ? "disabled" : ""}>Vyprázdnit výběr</button>
+          <p>${[...this._labelPair].map(([id, kind]) => `${kind === "entity" ? "Entita" : "Zařízení"}: ${this._escape(id)}`).join(" · ") || "U dvou řádků vyber položku do dvojice. Výběr zůstává i při změně filtru."}</p>
+          ${this._printStatus ? `<p role="status" aria-live="polite">${this._escape(this._printStatus)}</p>` : ""}
+        </section>
         <div class="table-wrap">
           <table>
             <thead><tr><th>${"Entity"}</th><th>${"State"}</th><th>${"Device"}</th><th>${"Integration"}</th><th>${"Audit"}</th><th>${"History"}</th></tr></thead>
@@ -3072,7 +3383,10 @@ class EntityAuditPanel extends HTMLElement {
               ${group.rows.map((entity) => {
                 const index = rowIndexes.get(entity.entity_id);
                 return `<tr>
-                  <td><div class="name">${this._escape(entity.name)}</div><div class="entity-id">${this._escape(entity.entity_id)}${entity.disabled ? ` · ${"disabled"}` : ""}</div></td>
+                  <td><div class="name">${this._escape(entity.name)}</div><div class="entity-id">${this._escape(entity.entity_id)}${entity.disabled ? ` · ${"disabled"}` : ""}</div>
+                    <div class="row-print-actions"><select class="label-action" data-index="${index}" aria-label="Štítek pro ${this._escape(entity.entity_id)}" ${this._printingLabels || this._buildingLabels ? "disabled" : ""}><option value="">Štítek…</option><option value="print-entity">Vytisknout entitu</option><option value="print-device" ${!entity.device_id || !entity.ip_address ? "disabled" : ""}>Vytisknout zařízení</option><option value="pair-entity">Do dvojice: entita</option><option value="pair-device" ${!entity.device_id || !entity.ip_address ? "disabled" : ""}>Do dvojice: zařízení</option>${this._labelPair.has(entity.entity_id) ? '<option value="pair-remove">Odebrat z dvojice</option>' : ""}</select>${this._labelPair.has(entity.entity_id) ? `<span class="muted">Ve dvojici: ${this._labelPair.get(entity.entity_id) === "entity" ? "entita" : "zařízení"}</span>` : ""}</div>
+                    ${this._printEntityId === entity.entity_id && this._printStatus ? `<div class="muted" role="status">${this._escape(this._printStatus)}</div>` : ""}
+                  </td>
                   <td><button class="state-button" data-index="${index}" title="${"Show entity details"}">${entity.problem ? `<span class="badge problem">${this._escape(entity.problem)}</span>` : `<span class="badge">${this._escape(entity.state ?? "—")}</span>`}</button></td>
                   <td><div>${this._escape(entity.device_name || "No device")}</div><div class="muted">${this._escape([entity.manufacturer, entity.model, entity.area_name, entity.ip_address ? `IP: ${entity.ip_address}` : "", entity.mac_address ? `MAC: ${entity.mac_address}` : ""].filter(Boolean).join(" · "))}</div></td>
                   <td>${this._escape(entity.platform || "—")}</td>
@@ -3083,6 +3397,20 @@ class EntityAuditPanel extends HTMLElement {
           </table>
         </div>
       </main>
+      ${this._labelEditor ? `<dialog class="label-editor" aria-label="Návrh štítku">
+        <div class="dialog-head"><h2>Návrh štítku</h2><button id="label-editor-close" aria-label="Zavřít">✕</button></div>
+        <div class="label-editor-body">
+          ${this._labelEditor.map((item, index) => `<label>Název ${index + 1} (${item.kind === "entity" ? "entita" : "zařízení"})<input class="label-title" data-index="${index}" maxlength="120" value="${this._escape(item.title)}"></label><small>${this._escape(item.kind === "entity" ? item.entity.entity_id : item.entity.ip_address || "")}</small>`).join("")}
+          <label>Tiskárna<select id="editor-printer"><option value="vc500w" ${this._brotherPrinter === "vc500w" ? "selected" : ""}>Brother VC-500W</option><option value="ql820nwb" ${this._brotherPrinter === "ql820nwb" ? "selected" : ""}>Brother QL-820NWB</option></select></label>
+          <label>Role<select id="editor-roll">${this._brotherRollOptions().map((roll) => `<option value="${roll.id}" ${roll.id === this._brotherRoll ? "selected" : ""}>${roll.name}</option>`).join("")}</select></label>
+          ${this._brotherRollOptions().find((roll) => roll.id === this._brotherRoll)?.length === null ? `<label>Délka (mm)<input id="editor-length" type="number" min="30" max="300" value="${this._escape(this._brotherLength)}"></label>` : ""}
+          <label>Obsah<select id="editor-variant"><option value="text" ${this._labelVariant === "text" ? "selected" : ""}>Text</option><option value="text_qr" ${this._labelVariant === "text_qr" ? "selected" : ""}>Text a QR</option><option value="qr" ${this._labelVariant === "qr" ? "selected" : ""}>Pouze QR</option></select></label>
+          <label>Uložená šablona<select id="editor-template"><option value="">Bez šablony</option>${this._labelTemplates.map((item) => `<option value="${this._escape(item.id)}" ${item.id === this._labelTemplateId ? "selected" : ""}>${this._escape(item.name)}</option>`).join("")}</select></label>
+          <div class="row-print-actions"><button id="template-save">Uložit novou</button><button id="template-update" ${!this._labelTemplateId ? "disabled" : ""}>Uložit změny</button><button id="template-delete" ${!this._labelTemplateId ? "disabled" : ""}>Smazat</button></div>
+          <strong>Náhled</strong><img id="label-preview" alt="Náhled štítku"><div id="label-preview-error" role="status"></div>
+          <small>Náhled nezaručuje přesnou fyzickou délku ani čitelnost po vytištění. ID entity a IP zařízení zůstávají původní.</small>
+          <div class="row-print-actions"><button id="editor-print">Pokračovat k potvrzení tisku</button><button id="editor-cancel">Zrušit</button></div>
+        </div></dialog>` : ""}
       ${this._selected ? `<dialog open>
         <div class="dialog-head"><div><h2>${this._escape(this._selected.name)}</h2><div class="entity-id">${this._escape(this._selected.entity_id)}</div></div><button id="clear">${"Clear history"}</button><button id="close">✕</button></div>
         <div class="dialog-body">
@@ -3098,6 +3426,7 @@ class EntityAuditPanel extends HTMLElement {
       this._filtersOpen = !this._filtersOpen;
       this._render();
     });
+    this.shadowRoot.querySelector(".print-options")?.addEventListener("toggle", (event) => { this._printOptionsOpen = event.target.open; });
     this.shadowRoot.querySelector("#search")?.addEventListener("input", (event) => {
       this._filter = event.target.value;
       this._render();
@@ -3133,19 +3462,56 @@ class EntityAuditPanel extends HTMLElement {
       this._brotherLength = event.target.value;
     });
     this.shadowRoot.querySelector("#download-brother-labels")?.addEventListener("click", () => this._downloadBrotherLabelsPdf(rows));
-    this.shadowRoot.querySelector("#print-brother-labels")?.addEventListener("click", () => this._printBrotherLabels(rows));
+    this.shadowRoot.querySelector("#print-brother-labels")?.addEventListener("click", () => {
+      this._printEntityId = null;
+      this._printBrotherLabels(rows);
+    });
     this.shadowRoot.querySelector("#stop-brother-print")?.addEventListener("click", () => { this._stopPrintRun = true; });
     this.shadowRoot.querySelector("#share-label-pdf")?.addEventListener("click", () => this._shareLabelPdf());
     this.shadowRoot.querySelector("#discard-label-pdf")?.addEventListener("click", () => { this._revokeLabelPdf(); this._render(); });
     this.shadowRoot.querySelectorAll(".toggle").forEach((input) => input.addEventListener("change", () => this._toggle(rows[Number(input.dataset.index)], input.checked)));
     this.shadowRoot.querySelectorAll(".history-button").forEach((button) => button.addEventListener("click", () => this._open(rows[Number(button.dataset.index)])));
     this.shadowRoot.querySelectorAll(".state-button").forEach((button) => button.addEventListener("click", () => this._showEntity(rows[Number(button.dataset.index)].entity_id)));
+    this.shadowRoot.querySelectorAll(".label-action").forEach((input) => input.addEventListener("change", () => {
+      const entity = rows[Number(input.dataset.index)];
+      const action = input.value;
+      input.value = "";
+      if (action === "print-entity" || action === "print-device") this._printRowLabel(entity, action.slice(6));
+      else if (action === "pair-entity" || action === "pair-device") this._setPairItem(entity, action.slice(5));
+      else if (action === "pair-remove") this._setPairItem(entity, "");
+    }));
+    this.shadowRoot.querySelector("#print-pair")?.addEventListener("click", () => this._printBrotherPair());
+    this.shadowRoot.querySelector("#clear-pair")?.addEventListener("click", () => { this._labelPair.clear(); this._render(); });
+    this.shadowRoot.querySelectorAll(".label-title").forEach((input) => input.addEventListener("input", () => {
+      this._labelEditor[Number(input.dataset.index)].title = input.value;
+      this._refreshLabelPreview();
+    }));
+    this.shadowRoot.querySelector("#editor-printer")?.addEventListener("change", (event) => {
+      this._brotherPrinter = event.target.value;
+      this._brotherRoll = this._brotherRollOptions()[0].id;
+      this._render(); this._refreshLabelPreview();
+    });
+    this.shadowRoot.querySelector("#editor-roll")?.addEventListener("change", (event) => { this._brotherRoll = event.target.value; this._render(); this._refreshLabelPreview(); });
+    this.shadowRoot.querySelector("#editor-length")?.addEventListener("input", (event) => { this._brotherLength = event.target.value; this._refreshLabelPreview(); });
+    this.shadowRoot.querySelector("#editor-variant")?.addEventListener("change", (event) => { this._labelVariant = event.target.value; this._refreshLabelPreview(); });
+    this.shadowRoot.querySelector("#editor-template")?.addEventListener("change", (event) => this._applyLabelTemplate(event.target.value));
+    this.shadowRoot.querySelector("#template-save")?.addEventListener("click", () => this._saveLabelTemplate());
+    this.shadowRoot.querySelector("#template-update")?.addEventListener("click", () => this._saveLabelTemplate(true));
+    this.shadowRoot.querySelector("#template-delete")?.addEventListener("click", () => this._deleteLabelTemplate());
+    this.shadowRoot.querySelector("#editor-print")?.addEventListener("click", () => this._submitLabelEditor());
+    for (const id of ["#editor-cancel", "#label-editor-close"]) this.shadowRoot.querySelector(id)?.addEventListener("click", () => { this._labelEditor = null; this._render(); });
+    const labelDialog = this.shadowRoot.querySelector(".label-editor");
+    if (labelDialog && !labelDialog.open) {
+      labelDialog.addEventListener("cancel", (event) => { event.preventDefault(); this._labelEditor = null; this._render(); });
+      // Modální režim drží editor nad seznamem i po posunu na mobilu.
+      try { labelDialog.showModal(); } catch (_error) { labelDialog.setAttribute("open", ""); }
+    }
     this.shadowRoot.querySelector("#close")?.addEventListener("click", () => { this._selected = null; this._render(); });
     this.shadowRoot.querySelector("#clear")?.addEventListener("click", () => this._clear());
     if (this._scannerOpen && typeof document !== "undefined") this._renderScannerDialog();
   }
 }
 
-if (!customElements.get("entity-audit-panel-v0330")) {
-  customElements.define("entity-audit-panel-v0330", EntityAuditPanel);
+if (!customElements.get("entity-audit-panel-v0332")) {
+  customElements.define("entity-audit-panel-v0332", EntityAuditPanel);
 }

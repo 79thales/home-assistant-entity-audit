@@ -27,11 +27,59 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_get_settings)
     websocket_api.async_register_command(hass, ws_log_activity)
     websocket_api.async_register_command(hass, ws_print_label)
+    websocket_api.async_register_command(hass, ws_list_label_templates)
+    websocket_api.async_register_command(hass, ws_save_label_template)
+    websocket_api.async_register_command(hass, ws_delete_label_template)
 
 
 def _manager(hass: HomeAssistant) -> EntityAuditManager:
     """Return the currently loaded manager."""
     return hass.data[DOMAIN]["manager"]
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/list_label_templates"})
+@websocket_api.async_response
+async def ws_list_label_templates(hass, connection, msg):
+    """Vrať pojmenované šablony pouze přihlášenému administrátorovi."""
+    connection.send_result(msg["id"], hass.data[DOMAIN]["label_templates"].list())
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): f"{DOMAIN}/save_label_template",
+    vol.Required("template"): {
+        vol.Required("name"): str, vol.Required("model"): str,
+        vol.Required("roll"): str, vol.Required("length_mm"): int,
+        vol.Required("variant"): str,
+    },
+    vol.Optional("template_id"): str,
+})
+@websocket_api.async_response
+async def ws_save_label_template(hass, connection, msg):
+    """Ulož ověřené rozměry a rozložení; obsah štítku se neukládá."""
+    try:
+        result = await hass.data[DOMAIN]["label_templates"].save(msg["template"], msg.get("template_id"))
+    except ValueError as error:
+        connection.send_error(msg["id"], "invalid_template", str(error))
+        return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): f"{DOMAIN}/delete_label_template",
+    vol.Required("template_id"): str,
+})
+@websocket_api.async_response
+async def ws_delete_label_template(hass, connection, msg):
+    """Smaž konkrétní šablonu po výslovné akci v editoru."""
+    try:
+        await hass.data[DOMAIN]["label_templates"].delete(msg["template_id"])
+    except ValueError as error:
+        connection.send_error(msg["id"], "invalid_template", str(error))
+        return
+    connection.send_result(msg["id"], {"success": True})
 
 
 @websocket_api.require_admin
