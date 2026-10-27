@@ -126,7 +126,19 @@ require("../custom_components/entity_audit/frontend/entity-audit-panel.js");
   view._entities = [entity, secondDevice];
   view._labelPair = new Map([[entity.entity_id, "entity"], [secondDevice.entity_id, "device"]]);
   view._render();
-  assert.match(view.shadowRoot.innerHTML, /Tisk, export a hromadné akce/);
+  assert.match(view.shadowRoot.innerHTML, /Actions: audit, export and labels/);
+  // Akce musí být i při zavřených filtrech mimo jejich mobilní skrývanou sekci.
+  const html = view.shadowRoot.innerHTML;
+  const filters = html.indexOf('<section class="filter-panel');
+  const filtersEnd = html.indexOf('</section>', filters);
+  const actions = html.indexOf('<details class="print-options"');
+  assert.ok(filters >= 0 && filtersEnd < actions);
+  assert.doesNotMatch(html, /TRONIC|download-tronic-labels/i);
+  view._printOptionsOpen = true;
+  view._brotherOptionsOpen = true;
+  view._render();
+  assert.match(view.shadowRoot.innerHTML, /<details class="print-options" open>/);
+  assert.match(view.shadowRoot.innerHTML, /<details class="brother-options" open>/);
   assert.match(view.shadowRoot.innerHTML, /Dva štítky vedle sebe \(2\/2\)/);
   assert.match(view.shadowRoot.innerHTML, /Do dvojice: entita/);
   // Editor mění pracovní kopii, QR identita i původní entita zůstávají.

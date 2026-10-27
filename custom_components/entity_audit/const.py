@@ -1,7 +1,7 @@
 """Constants for Entity Audit."""
 
 DOMAIN = "entity_audit"
-INTEGRATION_VERSION = "0.3.32"
+INTEGRATION_VERSION = "0.3.33"
 BACKUP_EXPORT_FORMAT_VERSION = 1
 STORAGE_KEY = f"{DOMAIN}.storage"
 STORAGE_VERSION = 1
@@ -75,5 +75,5 @@ QR_LIBRARY_URL = "/entity_audit/qrcode.js"
 QR_READER_LIBRARY_URL = "/entity_audit/jsQR.js"
 # Samostatná verze modulu i názvu prvku zabrání použití starého panelu
 # z cache prohlížeče po nasazení editoru štítků.
-PANEL_MODULE_URL = f"{PANEL_URL}?v=0.3.32"
+PANEL_MODULE_URL = f"{PANEL_URL}?v=0.3.33"
 PANEL_ELEMENT = "entity-audit-panel-v0332"

@@ -22,13 +22,13 @@ Entity Audit is a HACS-compatible custom integration that gives administrators o
 - groups entities by device, manufacturer (for example Shelly), model, integration, area, or entity domain;
 - filters by device, manufacturer, model, integration, area, entity domain, problem, and audit status;
 - enables or disables auditing in bulk for the currently filtered entities;
+- keeps audit, export and label actions in a separate expandable section, available on mobile even when filters are closed; Brother printer options expand independently;
 - exports the currently filtered entity list to a UTF-8 CSV file, including available IP and MAC addresses;
 - adds separate HACS repositories and users & permissions categories, each with independent filters and a UTF-8 CSV export;
 - adds separate Automations and Scripts categories with runtime status and state filters; item names open their native Home Assistant editor;
 - exports the currently filtered automation or script inventory as UTF-8 CSV or sanitized YAML; automation exports identify the current enabled, disabled, unavailable, or registry-disabled status;
 - exports a safe `configuration.yaml` include snippet separately and can create a read-only configuration-backup ZIP with validated `automations.yaml` and `scripts.yaml`, machine-readable automation states, dependency diagnostics, and runtime inventories;
 - creates a downloadable A4 PDF label sheet for the currently filtered devices with an IP address, deduplicated by IP address, including manufacturer, area, IP, and MAC address; configure the label dimensions and variant in the integration settings, then open, save, print, or share the generated PDF;
-- provides a TRONIC/Lidl 30 × 14 mm label PDF preset, with one compact page per device for the matching 14 × 30 mm roll; it honours the selected text, text-with-QR, or QR-only variant, uses two title lines and adaptive text sizing for long names, and can be opened, saved, or shared to the printer app;
 - offers text-only, text-with-QR, and QR-only label variants; QR payloads contain the complete label data and are generated locally in the browser;
 - offers Brother QL-820NWB PDF profiles for DK-11209 (62 × 29 mm), DK-11201 (29 × 90 mm), DK-11202 (62 × 100 mm), and continuous DK-22205 (62 mm) / DK-22210 (29 mm) rolls with a selectable 30–300 mm cut length; each device gets one page at the physical media size, using the configured label variant;
 - offers Brother VC-500W PDF profiles for CZ-1001 (9 mm), CZ-1002 (12 mm), CZ-1003 (19 mm), CZ-1004 (25 mm), and CZ-1005 (50 mm) continuous rolls with a selectable 30–300 mm cut length and 313 dpi artwork; narrow rolls use a two-column text layout and require text-only mode below 25 mm;
